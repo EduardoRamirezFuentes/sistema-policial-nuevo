@@ -14,7 +14,7 @@ console.log('URL base de la API:', API_BASE_URL);
 
 // Credenciales estáticas
 const ADMIN_USERNAME = 'admin';
-const ADMIN_PASSWORD = 'admin';
+const ADMIN_PASSWORD = 'admin123';
 
 // Elementos del DOM
 const loginForm = document.getElementById('loginForm');
