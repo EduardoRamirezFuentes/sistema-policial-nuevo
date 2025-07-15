@@ -243,125 +243,242 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Ruta para guardar un nuevo oficial
 app.post('/api/oficiales', upload.single('pdfFile'), async (req, res) => {
-    console.log('Solicitud POST recibida en /api/oficiales');
-    console.log('Headers:', req.headers);
-    console.log('Body:', req.body);
-    console.log('Archivo:', req.file);
+    console.log('=== Nueva solicitud POST a /api/oficiales ===');
+    console.log('Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('Body:', JSON.stringify(req.body, null, 2));
+    console.log('Archivo:', req.file ? {
+        fieldname: req.file.fieldname,
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size
+    } : 'Ningún archivo recibido');
     
     // Verificar si hay un archivo
     if (!req.file) {
-        console.log('No se recibió ningún archivo');
+        const error = 'No se recibió ningún archivo';
+        console.error(error);
         return res.status(400).json({ 
             success: false, 
-            message: 'Por favor, suba un archivo PDF válido' 
+            message: 'Por favor, suba un archivo PDF válido',
+            error: error
+        });
+    }
+    
+    // Verificar que el archivo sea un PDF
+    if (req.file.mimetype !== 'application/pdf') {
+        const error = `Tipo de archivo no permitido: ${req.file.mimetype}`;
+        console.error(error);
+        return res.status(400).json({
+            success: false,
+            message: 'Solo se permiten archivos PDF',
+            error: error
         });
     }
     
     let connection;
     
+    // Validar campos requeridos antes de obtener una conexión
+    const camposRequeridos = [
+        'nombreCompleto', 'curp', 'cuip', 'cup', 'edad', 'sexo', 'estadoCivil',
+        'areaAdscripcion', 'grado', 'cargoActual', 'fechaIngreso',
+        'escolaridad', 'telefonoContacto', 'telefonoEmergencia', 'funcion'
+    ];
+
+    // Validar que todos los campos requeridos estén presentes
+    const camposFaltantes = [];
+    const camposInvalidos = [];
+    
+    for (const campo of camposRequeridos) {
+        if (req.body[campo] === undefined || req.body[campo] === null || req.body[campo].trim() === '') {
+            camposFaltantes.push(campo);
+        } else if (typeof req.body[campo] === 'string') {
+            req.body[campo] = req.body[campo].trim();
+        }
+    }
+
+    if (camposFaltantes.length > 0) {
+        const error = `Faltan campos requeridos: ${camposFaltantes.join(', ')}`;
+        console.error(error);
+        return res.status(400).json({
+            success: false,
+            message: 'Por favor complete todos los campos requeridos',
+            error: error,
+            camposFaltantes: camposFaltantes
+        });
+    }
+    
     try {
-        // Obtener una conexión del pool
+        // Obtener una conexión del pool con timeout
         connection = await pool.connect();
+        console.log('Conexión a la base de datos establecida');
         
         // Iniciar transacción
         await connection.query('BEGIN');
+        console.log('Transacción iniciada');
         
         // Verificar conexión a la base de datos
-        const testResult = await connection.query('SELECT NOW() as current_time');
-        console.log('Conexión a la base de datos exitosa. Hora del servidor:', testResult.rows[0].current_time);
+        try {
+            const testResult = await connection.query('SELECT NOW() as current_time');
+            console.log('Conexión a la base de datos exitosa. Hora del servidor:', testResult.rows[0].current_time);
+        } catch (dbError) {
+            console.error('Error al conectar a la base de datos:', dbError);
+            throw new Error('No se pudo conectar a la base de datos');
+        }
+
+        // Validar formato de la CURP
+        const curp = req.body.curp.trim().toUpperCase();
+        const curpRegex = /^[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[0-9A-Z][0-9]$/;
         
-        // Validar campos requeridos
-        const camposRequeridos = [
-            'nombreCompleto', 'curp', 'cuip', 'cup', 'edad', 'sexo', 'estadoCivil',
-            'areaAdscripcion', 'grado', 'cargoActual', 'fechaIngreso',
-            'escolaridad', 'telefonoContacto', 'telefonoEmergencia', 'funcion'
-        ];
-
-        const camposFaltantes = [];
-        for (const campo of camposRequeridos) {
-            if (!req.body[campo]) {
-                camposFaltantes.push(campo);
-            }
+        if (!curpRegex.test(curp)) {
+            console.error('Formato de CURP inválido:', curp);
+            return res.status(400).json({
+                success: false,
+                message: 'Formato de CURP inválido',
+                error: 'La CURP debe tener el formato correcto (18 caracteres alfanuméricos)',
+                ejemplo: 'XAXX010101HDFABC01',
+                formatoEsperado: '4 letras + 6 números + H/M + 5 letras + 1 letra/número + 1 número'
+            });
         }
-
-        if (camposFaltantes.length > 0) {
-            throw new Error(`Faltan campos requeridos: ${camposFaltantes.join(', ')}`);
-        }
-
-        // Validar longitud de campos
-        if (req.body.curp.length !== 18) {
-            throw new Error('La CURP debe tener 18 caracteres');
+        
+        // Validar que la CURP no contenga palabras ofensivas
+        const palabrasProhibidas = ['BUEI', 'CACA', 'CACO', 'CAGA', 'CAGO', 'CAKA', 'CAKO', 'COGE', 'COJA', 'COJE', 'COJI', 'COJO', 'COLA', 'CULO', 'FALO', 'FETO', 'GETA', 'GUEY', 'JOTO', 'KACA', 'KACO', 'KAGA', 'KAGO', 'KAKA', 'KAKO', 'KOGE', 'KOJO', 'KAKA', 'KULO', 'MAME', 'MAMO', 'MEAR', 'MEAS', 'MEON', 'MION', 'MOCO', 'MULA', 'PEDA', 'PEDO', 'PENE', 'PIPI', 'PITO', 'POPO', 'PUTA', 'PUTO', 'QULO', 'RATA', 'RUIN'];
+        const primerasCuatroLetras = curp.substring(0, 4);
+        
+        if (palabrasProhibidas.includes(primerasCuatroLetras)) {
+            console.error('CURP contiene palabra prohibida:', primerasCuatroLetras);
+            return res.status(400).json({
+                success: false,
+                message: 'CURP no válida',
+                error: 'Las primeras cuatro letras de la CURP no son válidas',
+                motivo: 'Contiene una combinación no permitida',
+                valorRecibido: curp
+            });
         }
 
         // Validar que la edad sea un número válido
-        const edad = parseInt(req.body.edad);
+        const edad = parseInt(req.body.edad, 10);
         if (isNaN(edad) || edad < 18 || edad > 100) {
             throw new Error('La edad debe ser un número entre 18 y 100');
         }
 
         // Validar formato de fecha
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(req.body.fechaIngreso)) {
+        const fechaIngreso = new Date(req.body.fechaIngreso);
+        if (isNaN(fechaIngreso.getTime())) {
             throw new Error('El formato de fecha debe ser YYYY-MM-DD');
         }
+        
+        // Validar que la fecha no sea futura
+        const hoy = new Date();
+        if (fechaIngreso > hoy) {
+            throw new Error('La fecha de ingreso no puede ser futura');
+        }
 
-        // Limpiar números de teléfono (solo dígitos)
-        const telefonoContacto = req.body.telefonoContacto.replace(/\D/g, '');
-        const telefonoEmergencia = req.body.telefonoEmergencia.replace(/\D/g, '');
+        // Limpiar y validar números de teléfono
+        const limpiarTelefono = (telefono) => {
+            if (!telefono) return null;
+            const soloNumeros = telefono.replace(/\D/g, '');
+            if (soloNumeros.length < 10) {
+                throw new Error('El número de teléfono debe tener al menos 10 dígitos');
+            }
+            return soloNumeros;
+        };
+        
+        const telefonoContacto = limpiarTelefono(req.body.telefonoContacto);
+        const telefonoEmergencia = limpiarTelefono(req.body.telefonoEmergencia);
 
         // Crear objeto con los datos del oficial
         const oficialData = {
-            nombre_completo: req.body.nombreCompleto,
-            curp: req.body.curp,
-            cuip: req.body.cuip,
-            cup: req.body.cup,
+            nombre_completo: req.body.nombreCompleto.trim(),
+            curp: curp, // Usamos la CURP ya validada
+            cuip: req.body.cuip ? req.body.cuip.trim() : null,
+            cup: req.body.cup ? req.body.cup.trim() : null,
             edad: edad,
-            sexo: req.body.sexo,
-            estado_civil: req.body.estadoCivil,
-            area_adscripcion: req.body.areaAdscripcion,
-            grado: req.body.grado,
-            cargo_actual: req.body.cargoActual,
+            sexo: req.body.sexo.trim(),
+            estado_civil: req.body.estadoCivil.trim(),
+            area_adscripcion: req.body.areaAdscripcion.trim(),
+            grado: req.body.grado.trim(),
+            cargo_actual: req.body.cargoActual.trim(),
             fecha_ingreso: req.body.fechaIngreso,
-            escolaridad: req.body.escolaridad,
+            escolaridad: req.body.escolaridad.trim(),
             telefono_contacto: telefonoContacto,
             telefono_emergencia: telefonoEmergencia,
-            funcion: req.body.funcion,
-            pdf_nombre_archivo: req.file ? req.file.filename : null,
-            pdf_tipo: req.file ? req.file.mimetype : null,
-            pdf_tamanio: req.file ? req.file.size : null,
+            funcion: req.body.funcion.trim(),
+            pdf_nombre_archivo: req.file.filename,
+            pdf_tipo: req.file.mimetype,
+            pdf_tamanio: req.file.size,
             usuario_registro: 1, // ID del usuario administrador
             activo: 1,
-            fecha_registro: new Date()
+            fecha_registro: new Date().toISOString().slice(0, 19).replace('T', ' ')
         };
 
         console.log('Datos del oficial a insertar:', JSON.stringify(oficialData, null, 2));
         
         // Verificar si ya existe un registro con la misma CURP, CUIP o CUP
-        const [existing] = await connection.query(
-            'SELECT id FROM oficiales WHERE curp = ? OR cuip = ? OR cup = ?',
-            [oficialData.curp, oficialData.cuip, oficialData.cup]
-        );
-
-        if (existing && existing.length > 0) {
-            throw new Error('Ya existe un registro con la misma CURP, CUIP o CUP');
+        try {
+            const query = 'SELECT id, curp, cuip, cup FROM oficiales WHERE curp = $1 OR cuip = $2 OR cup = $3';
+            const values = [oficialData.curp, oficialData.cuip, oficialData.cup];
+            console.log('Verificando duplicados con:', { query, values });
+            
+            const existing = await connection.query(query, values);
+            
+            if (existing.rows && existing.rows.length > 0) {
+                const duplicados = [];
+                existing.rows.forEach(row => {
+                    if (row.curp === oficialData.curp) duplicados.push(`CURP: ${row.curp}`);
+                    if (row.cuip && row.cuip === oficialData.cuip) duplicados.push(`CUIP: ${row.cuip}`);
+                    if (row.cup && row.cup === oficialData.cup) duplicados.push(`CUP: ${row.cup}`);
+                });
+                
+                const errorMsg = `Ya existe un registro con: ${duplicados.join(', ')}`;
+                console.error(errorMsg);
+                throw new Error(errorMsg);
+            }
+        } catch (error) {
+            console.error('Error al verificar duplicados:', error);
+            throw error; // Relanzar para que lo maneje el catch externo
         }
 
         // Insertar el nuevo registro
-        const [result] = await connection.query('INSERT INTO oficiales SET ?', [oficialData]);
-        
-        // Confirmar la transacción
-        await connection.commit();
-        
-        console.log('Registro insertado correctamente. ID:', result.insertId);
-        
-        // Enviar respuesta exitosa
-        res.json({ 
-            success: true, 
-            message: 'Oficial registrado exitosamente',
-            data: {
-                id: result.insertId,
-                ...oficialData
+        try {
+            console.log('Insertando nuevo registro...');
+            const columns = Object.keys(oficialData).join(', ');
+            const placeholders = Object.keys(oficialData).map((_, i) => `$${i + 1}`).join(', ');
+            const values = Object.values(oficialData);
+            const query = `INSERT INTO oficiales (${columns}) VALUES (${placeholders}) RETURNING id`;
+            
+            console.log('Query de inserción:', query);
+            console.log('Valores:', values);
+            
+            const result = await connection.query(query, values);
+            console.log('Resultado de la inserción:', result.rows[0]);
+            
+            if (!result.rows || result.rows.length === 0) {
+                throw new Error('No se pudo obtener el ID del registro insertado');
             }
-        });
+            
+            // Confirmar la transacción
+            await connection.query('COMMIT');
+            console.log('Transacción confirmada');
+            
+            const nuevoId = result.rows[0].id;
+            console.log('Registro insertado correctamente. ID:', nuevoId);
+            
+            // Enviar respuesta exitosa
+            return res.status(201).json({ 
+                success: true, 
+                message: 'Oficial registrado exitosamente',
+                data: {
+                    id: nuevoId,
+                    ...oficialData
+                }
+            });
+            
+        } catch (insertError) {
+            console.error('Error al insertar el registro:', insertError);
+            await connection.query('ROLLBACK');
+            console.log('Transacción revertida debido a un error en la inserción');
+            throw insertError; // Relanzar para que lo maneje el catch externo
+        }
     } catch (error) {
         console.error('Error al procesar la solicitud:');
         console.error('- Mensaje:', error.message);
