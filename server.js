@@ -17,55 +17,34 @@ const allowedOrigins = [
   'http://localhost:10000'
 ];
 
-// Middleware para habilitar CORS
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  
-  // Verificar si el origen está en la lista blanca o si es una solicitud local
-  if (allowedOrigins.includes(origin) || !origin) {
-    res.header('Access-Control-Allow-Origin', origin || '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-    res.header('Access-Control-Allow-Credentials', 'true');
-    
-    // Responder inmediatamente a las solicitudes OPTIONS (preflight)
-    if (req.method === 'OPTIONS') {
-      return res.status(200).end();
-    }
-  } else {
-    // Opcional: Registrar intentos de acceso desde orígenes no permitidos
-    console.warn('Intento de acceso desde origen no permitido:', origin);
-  }
-  
-  next();
-});
-
-// Configuración CORS para rutas específicas
+// Configuración CORS mejorada
 const corsOptions = {
-  origin: (origin, callback) => {
+  origin: function (origin, callback) {
     // Permitir solicitudes sin origen (como aplicaciones móviles o curl)
     if (!origin) return callback(null, true);
     
+    // Verificar si el origen está en la lista blanca
     if (allowedOrigins.indexOf(origin) === -1) {
       const msg = `El origen ${origin} no tiene permiso de acceso.`;
-      console.error('Error CORS:', { 
-        origin, 
-        allowedOrigins, 
-        headers: JSON.stringify(req.headers, null, 2),
-        method: req.method,
-        url: req.originalUrl
-      });
+      console.warn('Intento de acceso desde origen no permitido:', origin);
       return callback(new Error(msg), false);
     }
+    
     return callback(null, true);
   },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
   exposedHeaders: ['Content-Length', 'Content-Range', 'X-Content-Range'],
-  maxAge: 600, // 10 minutos de caché para preflight (más corto para desarrollo)
-  optionsSuccessStatus: 204 // Algunos clientes (ej: Angular) tienen problemas con 200
+  credentials: true,
+  maxAge: 600, // 10 minutos de caché para preflight
+  optionsSuccessStatus: 200 // Algunos clientes necesitan 200 en lugar de 204
 };
+
+// Aplicar CORS a todas las rutas
+app.use(cors(corsOptions));
+
+// Manejar solicitudes OPTIONS (preflight) para todas las rutas
+app.options('*', cors(corsOptions));
 
 // Middleware de registro para depuración
 app.use((req, res, next) => {
@@ -327,16 +306,64 @@ app.post('/api/oficiales', upload.single('pdfFile'), async (req, res) => {
 
         // Validar formato de la CURP
         const curp = req.body.curp.trim().toUpperCase();
+        
+        // Expresión regular para validar el formato de la CURP
         const curpRegex = /^[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[0-9A-Z][0-9]$/;
         
+        // Verificar longitud exacta de 18 caracteres
+        if (curp.length !== 18) {
+            return res.status(400).json({
+                success: false,
+                message: 'Longitud de CURP incorrecta',
+                error: `La CURP debe tener exactamente 18 caracteres (tiene ${curp.length})`,
+                valorRecibido: curp,
+                ejemploValido: 'XAXX010101HDFABC01',
+                estructura: '4 letras + 6 números + H/M + 5 letras + 1 letra/número + 1 número'
+            });
+        }
+        
+        // Verificar formato con expresión regular
         if (!curpRegex.test(curp)) {
+            // Analizar qué parte del formato es incorrecta
+            let errorDetalle = 'Formato general incorrecto';
+            
+            // Verificar primeros 4 caracteres (letras)
+            if (!/^[A-Z]{4}/.test(curp)) {
+                errorDetalle = 'Los primeros 4 caracteres deben ser letras (iniciales de nombres y apellidos)';
+            } 
+            // Verificar siguiente bloque de 6 números (fecha de nacimiento)
+            else if (!/^[A-Z]{4}[0-9]{6}/.test(curp)) {
+                errorDetalle = 'Los caracteres 5-10 deben ser números (fecha de nacimiento AAMMDD)';
+            }
+            // Verificar sexo (H o M)
+            else if (!/^[A-Z]{4}[0-9]{6}[HM]/.test(curp)) {
+                errorDetalle = 'El carácter 11 debe ser H (hombre) o M (mujer)';
+            }
+            // Verificar los siguientes 5 caracteres (lugar de nacimiento)
+            else if (!/^[A-Z]{4}[0-9]{6}[HM][A-Z]{5}/.test(curp)) {
+                errorDetalle = 'Los caracteres 12-16 deben ser letras (lugar de nacimiento)';
+            }
+            // Verificar los últimos 2 caracteres (homoclave)
+            else if (!/^[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[0-9A-Z][0-9]$/.test(curp)) {
+                errorDetalle = 'Los últimos 2 caracteres deben ser alfanuméricos (homoclave)';
+            }
+            
             console.error('Formato de CURP inválido:', curp);
             return res.status(400).json({
                 success: false,
                 message: 'Formato de CURP inválido',
-                error: 'La CURP debe tener el formato correcto (18 caracteres alfanuméricos)',
-                ejemplo: 'XAXX010101HDFABC01',
-                formatoEsperado: '4 letras + 6 números + H/M + 5 letras + 1 letra/número + 1 número'
+                error: errorDetalle,
+                valorRecibido: curp,
+                ejemploValido: 'XAXX010101HDFABC01',
+                estructura: '4 letras (iniciales) + 6 números (AAMMDD) + H/M (sexo) + 5 letras (lugar) + 1 letra/número + 1 número',
+                nota: 'La CURP debe seguir el formato oficial de 18 caracteres alfanuméricos',
+                formatoEsperado: {
+                    posiciones: '1-4: Letras (iniciales)',
+                    fechaNacimiento: '5-10: Números (AAMMDD)',
+                    sexo: '11: H o M',
+                    lugarNacimiento: '12-16: Letras (lugar)',
+                    homoclave: '17-18: Alfanumérico (homoclave)'
+                }
             });
         }
         
