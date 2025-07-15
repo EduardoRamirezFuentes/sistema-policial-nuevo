@@ -6,9 +6,16 @@ if (typeof Chart === 'undefined') {
 }
 
 // Configuración de la API
-const API_BASE_URL = window.location.hostname === 'localhost' 
-  ? 'http://localhost:8080/api' 
-  : 'https://sistema-policial.onrender.com/api';
+const API_BASE_URL = 'https://sistema-policial.onrender.com/api';
+
+// Configuración de las opciones de fetch por defecto
+const fetchOptions = {
+  credentials: 'include',  // Incluir credenciales (cookies, encabezados HTTP)
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+  }
+};
 
 console.log('URL base de la API:', API_BASE_URL);
 
@@ -2522,9 +2529,14 @@ if (policiaForm) {
             }
             
             try {
+                // Usar fetchOptions como base y sobrescribir el método y body
                 const response = await fetch(`${API_BASE_URL}/oficiales`, {
+                    ...fetchOptions,
                     method: 'POST',
-                    body: formDataToSend
+                    body: formDataToSend,
+                    // No establecer Content-Type manualmente cuando se usa FormData,
+                    // el navegador lo hará automáticamente con el boundary correcto
+                    headers: {}
                 });
                 
                 console.log('Respuesta del servidor:', response.status, response.statusText);
