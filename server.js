@@ -13,24 +13,28 @@ const port = process.env.PORT || 10000; // Aseguramos que use el puerto 10000 co
 const allowedOrigins = [
   'https://sistema-policial-nuevo.onrender.com',
   'https://sistema-policial.onrender.com',
-  'http://localhost:8080'
+  'http://localhost:8080',
+  'http://localhost:10000'
 ];
 
-// Middleware CORS personalizado
+// Middleware para habilitar CORS
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   
-  // Verificar si el origen está permitido
-  if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  // Verificar si el origen está en la lista blanca o si es una solicitud local
+  if (allowedOrigins.includes(origin) || !origin) {
+    res.header('Access-Control-Allow-Origin', origin || '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
     res.header('Access-Control-Allow-Credentials', 'true');
-  }
-  
-  // Manejar solicitud OPTIONS (preflight)
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    
+    // Responder inmediatamente a las solicitudes OPTIONS (preflight)
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
+    }
+  } else {
+    // Opcional: Registrar intentos de acceso desde orígenes no permitidos
+    console.warn('Intento de acceso desde origen no permitido:', origin);
   }
   
   next();
@@ -38,19 +42,55 @@ app.use((req, res, next) => {
 
 // Configuración CORS para rutas específicas
 const corsOptions = {
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
+  origin: (origin, callback) => {
+    // Permitir solicitudes sin origen (como aplicaciones móviles o curl)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = `El origen ${origin} no tiene permiso de acceso.`;
+      console.error('Error CORS:', { 
+        origin, 
+        allowedOrigins, 
+        headers: JSON.stringify(req.headers, null, 2),
+        method: req.method,
+        url: req.originalUrl
+      });
+      return callback(new Error(msg), false);
     }
+    return callback(null, true);
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-  optionsSuccessStatus: 200,
-  preflightContinue: false
+  exposedHeaders: ['Content-Length', 'Content-Range', 'X-Content-Range'],
+  maxAge: 600, // 10 minutos de caché para preflight (más corto para desarrollo)
+  optionsSuccessStatus: 204 // Algunos clientes (ej: Angular) tienen problemas con 200
 };
+
+// Middleware de registro para depuración
+app.use((req, res, next) => {
+  console.log('\n=== Nueva Solicitud ===');
+  console.log(`Método: ${req.method} ${req.originalUrl}`);
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  
+  // Registrar el body para métodos POST, PUT, PATCH
+  if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
+    console.log('Body:', JSON.stringify(req.body, null, 2));
+  }
+  
+  // Registrar archivos subidos
+  if (req.file) {
+    console.log('Archivo subido:', {
+      fieldname: req.file.fieldname,
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size
+    });
+  }
+  
+  // Continuar con el siguiente middleware
+  next();
+});
 
 // Aplicar CORS a todas las rutas
 app.use(cors(corsOptions));
@@ -847,9 +887,33 @@ app.get('*', (req, res) => {
     });
 });
 
+// Manejador de errores global
+app.use((err, req, res, next) => {
+  console.error('\n=== ERROR GLOBAL ===');
+  console.error('Error:', err.message);
+  console.error('Stack:', err.stack);
+
+  // Si es un error de CORS, devolver un 403
+  if (err.message.includes('CORS')) {
+    return res.status(403).json({
+      success: false,
+      message: 'Acceso no permitido desde este origen',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+
+  // Para otros errores, devolver 500
+  res.status(500).json({
+    success: false,
+    message: 'Error interno del servidor',
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+  });
+});
+
 // Iniciar el servidor
 app.listen(port, () => {
-    console.log(`Servidor corriendo en http://localhost:${port}`);
+    console.log(`Servidor escuchando en http://localhost:${port}`);
+    console.log('Orígenes permitidos:', allowedOrigins);
     console.log('Credenciales de acceso:');
     console.log('Usuario: admin');
     console.log('Contraseña: admin');

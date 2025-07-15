@@ -1,12 +1,33 @@
+// Función para mostrar notificaciones al usuario
+function mostrarNotificacion(titulo, mensaje, tipo = 'info') {
+    // Verificar si existe algún sistema de notificaciones (como Toastr)
+    if (typeof toastr !== 'undefined') {
+        toastr[tipo](mensaje, titulo);
+    } 
+    // Si no hay sistema de notificaciones, usar alert estándar
+    else if (tipo === 'error') {
+        console.error(`[${titulo}] ${mensaje}`);
+        alert(`ERROR: ${mensaje}`);
+    } else if (tipo === 'success') {
+        console.log(`[${titulo}] ${mensaje}`);
+        alert(`¡Éxito! ${mensaje}`);
+    } else {
+        console.log(`[${titulo}] ${mensaje}`);
+        alert(`${titulo}: ${mensaje}`);
+    }
+}
+
 // Verificar que Chart.js esté cargado
 if (typeof Chart === 'undefined') {
     console.error('ERROR: Chart.js no está cargado correctamente');
+    mostrarNotificacion('Error', 'No se pudo cargar Chart.js correctamente', 'error');
 } else {
     console.log('Chart.js cargado correctamente, versión:', Chart.version);
 }
 
 // Configuración de la API
-const API_BASE_URL = 'https://sistema-policial.onrender.com';
+// Usar URL relativa para evitar problemas de CORS
+const API_BASE_URL = ''; // Usará el mismo dominio del frontend
 
 // Configuración de las opciones de fetch por defecto
 const fetchOptions = {
@@ -1410,12 +1431,29 @@ async function cambiarEstadoOficial(idOficial, nuevoEstado) {
             },
             body: JSON.stringify({ activo: nuevoEstado === 1 })
         });
-
+        
+        console.log('Respuesta recibida. Estado:', response.status, response.statusText);
+        
         if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || 'Error al actualizar el estado');
+            let errorMessage = `Error en la respuesta del servidor: ${response.status} ${response.statusText}`;
+            
+            try {
+                const errorData = await response.json();
+                console.error('Detalles del error:', errorData);
+                
+                if (errorData.error) {
+                    errorMessage = errorData.error;
+                }
+                if (errorData.details) {
+                    errorMessage += `\nDetalles: ${errorData.details}`;
+                }
+            } catch (e) {
+                console.error('No se pudo analizar la respuesta de error:', e);
+            }
+            
+            throw new Error(errorMessage);
         }
-
+        
         return await response.json();
     } catch (error) {
         console.error('Error en cambiarEstadoOficial:', error);
@@ -2572,6 +2610,11 @@ if (policiaForm) {
                 console.log('Preparando para enviar datos al servidor...');
                 
                 try {
+                    console.log('Enviando solicitud a:', `${API_BASE_URL}/api/oficiales`);
+                    console.log('Método: POST');
+                    console.log('Modo: cors');
+                    console.log('Credenciales: include');
+                    
                     // Usar fetch directamente para tener más control
                     const response = await fetch(`${API_BASE_URL}/api/oficiales`, {
                         method: 'POST',
@@ -2583,26 +2626,57 @@ if (policiaForm) {
                             'Origin': window.location.origin
                         }
                     });
-                    
-                    console.log('Respuesta del servidor recibida. Estado:', response.status, response.statusText);
-                    
-                    // Verificar si la respuesta es OK
+
+                    console.log('Respuesta recibida. Estado:', response.status, response.statusText);
+
                     if (!response.ok) {
-                        const errorText = await response.text();
-                        console.error('Error en la respuesta del servidor:', response.status, errorText);
-                        throw new Error(`Error del servidor: ${response.status} ${response.statusText}\n${errorText}`);
+                        let errorMessage = `Error en la respuesta del servidor: ${response.status} ${response.statusText}`;
+
+                        try {
+                            const errorData = await response.json();
+                            console.error('Detalles del error:', errorData);
+
+                            if (errorData.error) {
+                                errorMessage = errorData.error;
+                            }
+                            if (errorData.details) {
+                                errorMessage += `\nDetalles: ${errorData.details}`;
+                            }
+                        } catch (e) {
+                            console.error('No se pudo analizar la respuesta de error:', e);
+                        }
+
+                        throw new Error(errorMessage);
                     }
-                    
+
                     // Procesar la respuesta exitosa
                     try {
                         const data = await response.json();
-                        console.log('Datos de respuesta:', data);
-                        return data; // Retornar los datos para el siguiente bloque then
-                    } catch (jsonError) {
-                        console.error('Error al analizar la respuesta JSON:', jsonError);
-                        const text = await response.text();
-                        console.error('Respuesta del servidor (texto):', text);
-                        throw new Error('Error al procesar la respuesta del servidor');
+                        console.log('Datos recibidos del servidor:', data);
+                        
+                        // Mostrar mensaje de éxito con más detalles
+                        const mensajeExito = data.message || '¡Registro guardado exitosamente!';
+                        const detalleExito = data.id ? `ID del registro: ${data.id}` : '';
+                        
+                        console.log('Operación exitosa:', mensajeExito, detalleExito);
+                        
+                        // Mostrar notificación al usuario
+                        mostrarNotificacion('¡Éxito!', mensajeExito, 'success');
+                        
+                        // Limpiar el formulario
+                        this.reset();
+                        
+                        // Si hay un ID de registro, lo mostramos en consola
+                        if (data.id) {
+                            console.log(`Registro guardado con ID: ${data.id}`);
+                        }
+                        
+                        // Redirigir o realizar otra acción necesaria
+                        // window.location.href = '/exito.html';
+                    } catch (parseError) {
+                        console.error('Error al analizar la respuesta JSON:', parseError);
+                        console.error('Contenido de la respuesta:', await response.text());
+                        throw new Error('Error al procesar la respuesta del servidor. Por favor, verifica la consola para más detalles.');
                     }
                 } catch (error) {
                     console.error('Error en la petición fetch:', error);
