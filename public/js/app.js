@@ -10,12 +10,46 @@ const API_BASE_URL = 'https://sistema-policial.onrender.com/api';
 
 // Configuración de las opciones de fetch por defecto
 const fetchOptions = {
+  mode: 'cors',
   credentials: 'include',  // Incluir credenciales (cookies, encabezados HTTP)
   headers: {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json'
+    'Accept': 'application/json',
+    // No establecer Content-Type aquí, se establecerá automáticamente para FormData
   }
 };
+
+// Función para realizar peticiones con manejo de errores mejorado
+async function fetchWithTimeout(resource, options = {}) {
+  const timeout = 30000; // 30 segundos de timeout
+  
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(resource, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        ...(options.headers || {}),
+        // No establecer Content-Type aquí, se establecerá automáticamente
+      }
+    });
+    
+    clearTimeout(id);
+    
+    if (!response.ok) {
+      const error = new Error(`Error HTTP: ${response.status} ${response.statusText}`);
+      error.response = response;
+      throw error;
+    }
+    
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    console.error('Error en la petición:', error);
+    throw error;
+  }
+}
 
 console.log('URL base de la API:', API_BASE_URL);
 
@@ -2529,15 +2563,19 @@ if (policiaForm) {
             }
             
             try {
-                // Usar fetchOptions como base y sobrescribir el método y body
-                const response = await fetch(`${API_BASE_URL}/oficiales`, {
-                    ...fetchOptions,
+                // Usar fetchWithTimeout para la petición
+                const response = await fetchWithTimeout(`${API_BASE_URL}/oficiales`, {
                     method: 'POST',
                     body: formDataToSend,
+                    credentials: 'include',
                     // No establecer Content-Type manualmente cuando se usa FormData,
                     // el navegador lo hará automáticamente con el boundary correcto
-                    headers: {}
+                    headers: {
+                        'Accept': 'application/json'
+                    }
                 });
+                
+                console.log('Respuesta del servidor recibida:', response.status, response.statusText);
                 
                 console.log('Respuesta del servidor:', response.status, response.statusText);
                 

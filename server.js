@@ -9,42 +9,35 @@ const bodyParser = require('body-parser');
 const app = express();
 const port = process.env.PORT || 8080;
 
-// Configuración de CORS
-const allowedOrigins = [
-  'https://sistema-policial-nuevo.onrender.com',
-  'https://sistema-policial.onrender.com',
-  'http://localhost:8080'
-];
-
-// Middleware CORS personalizado
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  
-  // Manejar solicitudes preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  
-  next();
-});
-
-// También mantener el middleware de cors para compatibilidad
-app.use(cors({
-  origin: function(origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+// Configuración de CORS simplificada
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Permitir solicitudes sin 'origin' (como aplicaciones móviles o curl)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      'https://sistema-policial-nuevo.onrender.com',
+      'https://sistema-policial.onrender.com',
+      'http://localhost:8080'
+    ];
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+
+// Aplicar CORS a todas las rutas
+app.use(cors(corsOptions));
+
+// Manejar solicitudes OPTIONS (preflight) para todas las rutas
+app.options('*', cors(corsOptions));
 
 // Cargar variables de entorno
 require('dotenv').config();
@@ -92,16 +85,12 @@ app.use(express.static('public'));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Ruta para guardar un nuevo oficial
-// Manejar solicitudes OPTIONS (preflight)
-app.options('/api/oficiales', (req, res) => {
-    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.status(200).end();
-});
-
 app.post('/api/oficiales', upload.single('pdfFile'), async (req, res) => {
+    // Configurar encabezados CORS para la respuesta
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
     console.log('Solicitud POST recibida en /api/oficiales');
     console.log('Cuerpo de la solicitud (body):', req.body);
     console.log('Archivo adjunto:', req.file);
