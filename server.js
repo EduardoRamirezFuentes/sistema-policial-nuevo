@@ -9,20 +9,29 @@ const bodyParser = require('body-parser');
 const app = express();
 const port = process.env.PORT || 10000; // Aseguramos que use el puerto 10000 como en Render
 
-// Configuración de CORS simplificada
-app.use(cors({
-  origin: [
-    'https://sistema-policial-nuevo.onrender.com',
-    'https://sistema-policial.onrender.com',
-    'http://localhost:8080'
-  ],
+// Configuración de CORS
+const allowedOrigins = [
+  'https://sistema-policial-nuevo.onrender.com',
+  'https://sistema-policial.onrender.com',
+  'http://localhost:8080'
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
-}));
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  optionsSuccessStatus: 200
+};
 
-// Manejar preflight para todas las rutas
-app.options('*', cors());
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 // Cargar variables de entorno
 require('dotenv').config();
@@ -31,15 +40,30 @@ require('dotenv').config();
 const poolConfig = {
   connectionString: process.env.DATABASE_URL || 'postgresql://admin:wnwX96YVvGqhXghRH2hCdfHQFGn82nm8@dpg-d1o234odl3ps73fn3v4g-a.oregon-postgres.render.com:5432/sistema_policial',
   ssl: {
-    rejectUnauthorized: false
+    rejectUnauthorized: false,  // Necesario para Render PostgreSQL
+    sslmode: 'require'          // Forzar el uso de SSL
   },
-  connectionTimeoutMillis: 10000, // 10 segundos para conectar
-  idleTimeoutMillis: 30000,       // 30 segundos de inactividad
-  max: 20,                       // Máximo de clientes en el pool
-  min: 2,                        // Mínimo de clientes en el pool
-  acquireTimeoutMillis: 10000,    // 10 segundos para adquirir conexión
-  query_timeout: 10000,           // 10 segundos de tiempo de espera por consulta
-  statement_timeout: 10000        // 10 segundos de tiempo de espera por sentencia
+  // Configuración del pool de conexiones
+  max: 20,                      // Número máximo de clientes en el pool
+  min: 2,                       // Número mínimo de clientes en el pool
+  idleTimeoutMillis: 30000,      // Tiempo máximo que un cliente puede permanecer inactivo en el pool
+  connectionTimeoutMillis: 10000, // Tiempo máximo para establecer una nueva conexión
+  application_name: 'sistema-policial-api', // Identificador de la aplicación
+  // Manejo de reconexión
+  retry: {
+    max: 3,                     // Número máximo de intentos de reconexión
+    backoff: 1000               // Tiempo de espera entre intentos (en ms)
+  },
+  // Timeouts
+  query_timeout: 15000,          // 15 segundos de tiempo de espera por consulta
+  statement_timeout: 15000,      // 15 segundos de tiempo de espera por sentencia
+  // Manejo de conexiones inactivas
+  idle_in_transaction_session_timeout: 30000, // 30 segundos para transacciones inactivas
+  // Configuración de KeepAlive
+  keepalives: 1,                // Habilitar keepalive
+  keepalives_idle: 10000,        // 10 segundos de inactividad antes de enviar keepalive
+  keepalives_interval: 10000,    // 10 segundos entre keepalives
+  keepalives_count: 3            // Número de keepalives perdidos antes de marcar la conexión como muerta
 };
 
 console.log('Configuración de la base de datos:', {
@@ -58,16 +82,64 @@ pool.on('error', (err) => {
 // Función para probar la conexión a la base de datos
 async function testDatabaseConnection() {
   let client;
+  const startTime = Date.now();
+  
   try {
+    console.log('Intentando conectar a la base de datos...');
+    console.log('Host:', poolConfig.connectionString.split('@')[1].split('/')[0]);
+    console.log('Base de datos:', poolConfig.connectionString.split('/').pop().split('?')[0]);
+    
+    // Intentar conectar
     client = await pool.connect();
-    const result = await client.query('SELECT NOW()');
-    console.log('Conexión a la base de datos exitosa. Hora actual del servidor:', result.rows[0].now);
+    const connectTime = Date.now() - startTime;
+    
+    // Ejecutar una consulta de prueba
+    const queryStart = Date.now();
+    const result = await client.query('SELECT NOW() as hora_servidor, current_database() as nombre_bd, version() as version_pg');
+    const queryTime = Date.now() - queryStart;
+    
+    console.log('✅ Conexión a la base de datos exitosa:');
+    console.log(`- Tiempo de conexión: ${connectTime}ms`);
+    console.log(`- Tiempo de consulta: ${queryTime}ms`);
+    console.log('- Información de la base de datos:');
+    console.log(`  - Hora del servidor: ${result.rows[0].hora_servidor}`);
+    console.log(`  - Base de datos: ${result.rows[0].nombre_bd}`);
+    console.log(`  - Versión de PostgreSQL: ${result.rows[0].version_pg.split(',')[0]}`);
+    
     return true;
   } catch (error) {
-    console.error('Error al conectar a la base de datos:', error);
+    const errorTime = Date.now() - startTime;
+    console.error('❌ Error al conectar a la base de datos:');
+    console.error(`- Tiempo transcurrido: ${errorTime}ms`);
+    console.error('- Código de error:', error.code);
+    console.error('- Mensaje:', error.message);
+    
+    if (error.code === 'ETIMEDOUT') {
+      console.error('- Problema: Tiempo de espera agotado al intentar conectar al servidor de base de datos');
+      console.error('- Solución: Verifica que la URL de conexión sea correcta y que el servidor esté en línea');
+    } else if (error.code === 'ENOTFOUND') {
+      console.error('- Problema: No se pudo resolver el nombre del host de la base de datos');
+      console.error('- Solución: Verifica la configuración de red y el nombre del host');
+    } else if (error.code === '3D000') {
+      console.error('- Problema: La base de datos especificada no existe');
+      console.error('- Solución: Verifica el nombre de la base de datos en la URL de conexión');
+    } else if (error.code === '28P01') {
+      console.error('- Problema: Error de autenticación');
+      console.error('- Solución: Verifica el nombre de usuario y la contraseña en la URL de conexión');
+    } else if (error.code === 'ECONNREFUSED') {
+      console.error('- Problema: Conexión rechazada por el servidor');
+      console.error('- Solución: Verifica que el servidor PostgreSQL esté en ejecución y aceptando conexiones');
+    }
+    
     return false;
   } finally {
-    if (client) client.release();
+    if (client) {
+      try {
+        await client.release();
+      } catch (releaseError) {
+        console.error('Error al liberar la conexión:', releaseError);
+      }
+    }
   }
 }
 
@@ -109,10 +181,18 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // Ruta para guardar un nuevo oficial
 app.post('/api/oficiales', upload.single('pdfFile'), async (req, res) => {
     // Configurar encabezados CORS para la respuesta
-    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    const origin = req.headers.origin;
+    if (allowedOrigins.includes(origin)) {
+        res.header('Access-Control-Allow-Origin', origin);
+    }
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
     res.header('Access-Control-Allow-Credentials', 'true');
+    
+    // Manejar solicitud OPTIONS (preflight)
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
     
     console.log('Solicitud POST recibida en /api/oficiales');
     console.log('Cuerpo de la solicitud (body):', req.body);

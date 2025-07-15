@@ -1403,7 +1403,7 @@ async function eliminarEvaluacion(id, nombre) {
 // Función para cambiar el estado de un oficial
 async function cambiarEstadoOficial(idOficial, nuevoEstado) {
     try {
-        const response = await fetch(`${API_BASE_URL}/oficiales/${idOficial}/estado`, {
+        const response = await fetch(`${API_BASE_URL}/api/oficiales/${idOficial}/estado`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
@@ -1505,7 +1505,7 @@ async function cargarGraficaEstadoOficiales() {
         contenedorContadores?.classList.add('d-none');
         
         console.log('3. Realizando solicitud a la API...');
-        const response = await fetch(`${API_BASE_URL}/oficiales/estadisticas`, {
+        const response = await fetch(`${API_BASE_URL}/api/oficiales/estadisticas`, {
             headers: {
                 'Accept': 'application/json'
             }
@@ -2518,7 +2518,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // Función para probar la conexión con el servidor
 async function testConnection() {
     try {
-        const response = await fetch(`${API_BASE_URL}/test`);
+        const response = await fetch(`${API_BASE_URL}/api/test`);
         const data = await response.json();
         console.log('Conexión con el servidor:', data);
         return data.success;
@@ -2573,14 +2573,14 @@ if (policiaForm) {
                 
                 try {
                     // Usar fetch directamente para tener más control
-                    const response = await fetch(`${API_BASE_URL}/oficiales`, {
+                    const response = await fetch(`${API_BASE_URL}/api/oficiales`, {
                         method: 'POST',
                         body: formDataToSend,
                         credentials: 'include',
                         mode: 'cors',
                         headers: {
-                            'Accept': 'application/json'
-                            // No establecer Content-Type, se establecerá automáticamente para FormData
+                            'Accept': 'application/json',
+                            'Origin': window.location.origin
                         }
                     });
                     
@@ -2711,7 +2711,7 @@ async function searchPolicia(searchTerm) {
     searchResults.innerHTML = '<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Buscando...</span></div></div>';
     
     try {
-        const response = await fetch(`${API_BASE_URL}/oficiales/buscar?termino=${encodeURIComponent(searchTerm)}`);
+        const response = await fetch(`${API_BASE_URL}/api/oficiales/buscar?termino=${encodeURIComponent(searchTerm)}`);
         
         if (!response.ok) {
             throw new Error(`Error HTTP: ${response.status}`);
@@ -2831,7 +2831,7 @@ function displaySearchResults(resultados) {
 // Función para probar la conexión con el servidor
 async function testConnection() {
     try {
-        const response = await fetch(`${API_BASE_URL}/test`);
+        const response = await fetch(`${API_BASE_URL}/api/test`);
         const data = await response.json();
         console.log('Conexión con el servidor:', data);
         return data.success;
