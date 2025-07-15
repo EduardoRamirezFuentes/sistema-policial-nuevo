@@ -2571,45 +2571,54 @@ if (policiaForm) {
             try {
                 console.log('Preparando para enviar datos al servidor...');
                 
-                // Usar fetch directamente para tener más control
-                const response = await fetch(`${API_BASE_URL}/oficiales`, {
-                    method: 'POST',
-                    body: formDataToSend,
-                    credentials: 'include',
-                    mode: 'cors',
-                    // No establecer Content-Type manualmente cuando se usa FormData
-                    headers: {
-                        'Accept': 'application/json'
-                    }
-                }).catch(error => {
-                    console.error('Error en la petición fetch:', error);
-                    throw new Error(`Error de red: ${error.message}`);
-                });
-                
-                console.log('Respuesta del servidor recibida. Estado:', response.status, response.statusText);
-                
-                // Verificar si la respuesta es OK
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    console.error('Error en la respuesta del servidor:', response.status, errorText);
-                    throw new Error(`Error del servidor: ${response.status} ${response.statusText}\n${errorText}`);
-                }
-                
-                // Intentar obtener el cuerpo de la respuesta como JSON
-                let data;
                 try {
-                    data = await response.json();
-                    console.log('Datos de respuesta:', data);
-                } catch (jsonError) {
-                    console.error('Error al analizar la respuesta JSON:', jsonError);
-                    const text = await response.text();
-                    console.error('Respuesta del servidor (texto):', text);
-                    throw new Error('Error al procesar la respuesta del servidor');
+                    // Usar fetch directamente para tener más control
+                    const response = await fetch(`${API_BASE_URL}/oficiales`, {
+                        method: 'POST',
+                        body: formDataToSend,
+                        credentials: 'include',
+                        mode: 'cors',
+                        headers: {
+                            'Accept': 'application/json'
+                            // No establecer Content-Type, se establecerá automáticamente para FormData
+                        }
+                    });
+                    
+                    console.log('Respuesta del servidor recibida. Estado:', response.status, response.statusText);
+                    
+                    // Verificar si la respuesta es OK
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.error('Error en la respuesta del servidor:', response.status, errorText);
+                        throw new Error(`Error del servidor: ${response.status} ${response.statusText}\n${errorText}`);
+                    }
+                    
+                    // Procesar la respuesta exitosa
+                    try {
+                        const data = await response.json();
+                        console.log('Datos de respuesta:', data);
+                        return data; // Retornar los datos para el siguiente bloque then
+                    } catch (jsonError) {
+                        console.error('Error al analizar la respuesta JSON:', jsonError);
+                        const text = await response.text();
+                        console.error('Respuesta del servidor (texto):', text);
+                        throw new Error('Error al procesar la respuesta del servidor');
+                    }
+                } catch (error) {
+                    console.error('Error en la petición fetch:', error);
+                    if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                        throw new Error('No se pudo conectar con el servidor. Por favor, verifica tu conexión a internet.');
+                    } else if (error.response) {
+                        // Si el error viene con una respuesta del servidor
+                        const errorText = await error.response.text().catch(() => 'No se pudo obtener el mensaje de error');
+                        console.error('Error del servidor:', error.response.status, errorText);
+                        throw new Error(`Error del servidor (${error.response.status}): ${errorText}`);
+                    }
+                    throw error; // Re-lanzar el error para que lo maneje el bloque catch externo
                 }
                 
-                if (!response.ok) {
-                    throw new Error(data.message || `Error del servidor: ${response.status} ${response.statusText}`);
-                }
+                // La verificación de response.ok ya se realizó anteriormente
+                // Si llegamos aquí, la respuesta fue exitosa
             
                 if (data.success) {
                     // Mostrar mensaje de éxito

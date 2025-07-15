@@ -7,64 +7,75 @@ const { Pool } = require('pg');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const app = express();
-const port = process.env.PORT || 8080;
+const port = process.env.PORT || 10000; // Aseguramos que use el puerto 10000 como en Render
 
 // Configuración de CORS simplificada
-const allowedOrigins = [
-  'https://sistema-policial-nuevo.onrender.com',
-  'https://sistema-policial.onrender.com',
-  'http://localhost:8080'
-];
-
-// Middleware CORS personalizado
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  
-  // Permitir solicitudes desde los orígenes permitidos
-  if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-    res.header('Access-Control-Allow-Credentials', 'true');
-  }
-  
-  // Manejar solicitudes OPTIONS (preflight)
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  
-  next();
-});
-
-// También aplicar el middleware de cors para compatibilidad
 app.use(cors({
-  origin: function(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: [
+    'https://sistema-policial-nuevo.onrender.com',
+    'https://sistema-policial.onrender.com',
+    'http://localhost:8080'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
 }));
 
+// Manejar preflight para todas las rutas
+app.options('*', cors());
+
 // Cargar variables de entorno
 require('dotenv').config();
 
 // Configuración de la conexión a PostgreSQL
-const pool = new Pool({
+const poolConfig = {
   connectionString: process.env.DATABASE_URL || 'postgresql://admin:wnwX96YVvGqhXghRH2hCdfHQFGn82nm8@dpg-d1o234odl3ps73fn3v4g-a.oregon-postgres.render.com:5432/sistema_policial',
   ssl: {
     rejectUnauthorized: false
   },
-  connectionTimeoutMillis: 10000,
-  idleTimeoutMillis: 30000,
-  max: 10,
-  min: 0,
-  acquireTimeoutMillis: 10000,
-  timeout: 10000
+  connectionTimeoutMillis: 10000, // 10 segundos para conectar
+  idleTimeoutMillis: 30000,       // 30 segundos de inactividad
+  max: 20,                       // Máximo de clientes en el pool
+  min: 2,                        // Mínimo de clientes en el pool
+  acquireTimeoutMillis: 10000,    // 10 segundos para adquirir conexión
+  query_timeout: 10000,           // 10 segundos de tiempo de espera por consulta
+  statement_timeout: 10000        // 10 segundos de tiempo de espera por sentencia
+};
+
+console.log('Configuración de la base de datos:', {
+  ...poolConfig,
+  connectionString: poolConfig.connectionString ? '***CONNECTION STRING SET***' : 'NO CONNECTION STRING'
+});
+
+const pool = new Pool(poolConfig);
+
+// Manejar eventos de error en el pool
+pool.on('error', (err) => {
+  console.error('Error inesperado en el pool de conexiones:', err);
+  // No es necesario terminar el proceso aquí, el pool se encargará de reconectar
+});
+
+// Función para probar la conexión a la base de datos
+async function testDatabaseConnection() {
+  let client;
+  try {
+    client = await pool.connect();
+    const result = await client.query('SELECT NOW()');
+    console.log('Conexión a la base de datos exitosa. Hora actual del servidor:', result.rows[0].now);
+    return true;
+  } catch (error) {
+    console.error('Error al conectar a la base de datos:', error);
+    return false;
+  } finally {
+    if (client) client.release();
+  }
+}
+
+// Probar la conexión al iniciar el servidor
+testDatabaseConnection().then(success => {
+  if (!success) {
+    console.error('No se pudo conectar a la base de datos. Verifica la configuración.');
+  }
 });
 
 // Configuración de Multer para subir archivos
@@ -96,38 +107,29 @@ app.use(express.static('public'));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Ruta para guardar un nuevo oficial
-// Ruta OPTIONS para preflight
-app.options('/api/oficiales', (req, res) => {
-    const origin = req.headers.origin;
-    if (allowedOrigins.includes(origin)) {
-        res.header('Access-Control-Allow-Origin', origin);
-        res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-        res.header('Access-Control-Allow-Credentials', 'true');
-        return res.status(200).end();
-    }
-    return res.status(403).end();
-});
-
 app.post('/api/oficiales', upload.single('pdfFile'), async (req, res) => {
     // Configurar encabezados CORS para la respuesta
-    const origin = req.headers.origin;
-    if (allowedOrigins.includes(origin)) {
-        res.header('Access-Control-Allow-Origin', origin);
-        res.header('Access-Control-Allow-Credentials', 'true');
-    }
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    
     console.log('Solicitud POST recibida en /api/oficiales');
     console.log('Cuerpo de la solicitud (body):', req.body);
     console.log('Archivo adjunto:', req.file);
     
-    const connection = await pool.getConnection();
+    let connection;
     
     try {
-        await connection.beginTransaction();
+        // Obtener una conexión del pool
+        connection = await pool.connect();
+        
+        // Iniciar transacción
+        await connection.query('BEGIN');
         
         // Verificar conexión a la base de datos
-        const [testResult] = await connection.query('SELECT 1 as test');
-        console.log('Conexión a la base de datos exitosa:', testResult);
+        const testResult = await connection.query('SELECT NOW() as current_time');
+        console.log('Conexión a la base de datos exitosa. Hora del servidor:', testResult.rows[0].current_time);
         
         // Validar campos requeridos
         const camposRequeridos = [
@@ -214,36 +216,53 @@ app.post('/api/oficiales', upload.single('pdfFile'), async (req, res) => {
             id: result.insertId
         });
     } catch (error) {
-        await connection.rollback();
-        console.error('Error al guardar el oficial:');
-        console.error('Mensaje de error:', error.message);
-        console.error('Stack trace:', error.stack);
+        console.error('Error al procesar la solicitud:');
+        console.error('- Mensaje:', error.message);
+        console.error('- Stack:', error.stack);
         
-        // Mostrar más detalles del error de MySQL si está disponible
-        if (error.sql) {
-            console.error('Consulta SQL:', error.sql);
-            console.error('Código de error:', error.code);
-            console.error('Número de error:', error.errno);
+        // Detalles adicionales para errores de base de datos
+        if (error.code) console.error('- Código de error:', error.code);
+        if (error.detail) console.error('- Detalles:', error.detail);
+        if (error.hint) console.error('- Sugerencia:', error.hint);
+        if (error.position) console.error('- Posición del error:', error.position);
+        
+        // Hacer rollback si hay una transacción activa
+        if (connection) {
+            try {
+                await connection.query('ROLLBACK');
+                console.log('Transacción revertida debido a un error');
+            } catch (rollbackError) {
+                console.error('Error al hacer rollback:', rollbackError);
+            }
         }
         
-        // Eliminar el archivo subido si hubo un error
-        if (req.file && fs.existsSync(req.file.path)) {
-            console.log('Eliminando archivo subido debido al error:', req.file.path);
-            fs.unlinkSync(req.file.path);
-        }
+        // Determinar el código de estado HTTP apropiado
+        const statusCode = error.code === '23505' ? 409 : 500; // 409 para duplicados
         
-        res.status(500).json({ 
-            success: false, 
-            message: 'Error al guardar el oficial: ' + error.message,
-            error: error.message,
-            errorDetails: process.env.NODE_ENV === 'development' ? {
-                code: error.code,
-                errno: error.errno,
-                sql: error.sql
-            } : undefined
+        // Enviar respuesta de error
+        res.status(statusCode).json({
+            success: false,
+            message: 'Error al procesar la solicitud',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Error interno del servidor',
+            ...(process.env.NODE_ENV === 'development' && { 
+                details: error.detail,
+                hint: error.hint,
+                code: error.code
+            })
         });
     } finally {
-        connection.release();
+        // Liberar la conexión de vuelta al pool
+        if (connection) {
+            try {
+                // Verificar si la conexión aún está activa antes de liberarla
+                if (connection._connected || !connection._ending) {
+                    await connection.release(true); // Forzar la liberación
+                    console.log('Conexión liberada al pool');
+                }
+            } catch (releaseError) {
+                console.error('Error al liberar la conexión:', releaseError);
+            }
+        }
     }
 });
 
@@ -505,7 +524,11 @@ app.post('/api/evaluaciones', express.json(), async (req, res) => {
 app.get('/api/evaluaciones', async (req, res) => {
     let connection;
     try {
+        console.log('Obteniendo conexión a la base de datos...');
         connection = await pool.getConnection();
+        console.log('Conexión a la base de datos establecida');
+        
+        console.log('Ejecutando consulta de evaluaciones...');
         const [evaluaciones] = await connection.query(
             `SELECT e.*, o.nombre_completo as nombre_oficial,
                     'Sistema' as nombre_usuario
@@ -514,7 +537,7 @@ app.get('/api/evaluaciones', async (req, res) => {
              ORDER BY e.fecha_evaluacion DESC, e.fecha_registro DESC`
         );
         
-        connection.release();
+        console.log(`Se encontraron ${evaluaciones.length} evaluaciones`);
         
         // Formatear fechas para mostrarlas correctamente
         const evaluacionesFormateadas = evaluaciones.map(eval => ({
@@ -523,23 +546,46 @@ app.get('/api/evaluaciones', async (req, res) => {
             fecha_registro: eval.fecha_registro ? new Date(eval.fecha_registro).toISOString() : null
         }));
         
+        // Liberar la conexión antes de enviar la respuesta
+        if (connection) {
+            await connection.release();
+            console.log('Conexión liberada');
+        }
+        
         res.json({
             success: true,
             data: evaluacionesFormateadas
         });
         
     } catch (error) {
+        console.error('Error al obtener las evaluaciones:');
+        console.error('- Mensaje:', error.message);
+        console.error('- Stack:', error.stack);
+        
+        if (error.code) console.error('- Código de error:', error.code);
+        if (error.detail) console.error('- Detalles:', error.detail);
+        if (error.hint) console.error('- Sugerencia:', error.hint);
+        
+        // Asegurarse de liberar la conexión en caso de error
         if (connection) {
-            connection.release();
+            try {
+                await connection.release(true); // Forzar la liberación
+                console.log('Conexión liberada después del error');
+            } catch (releaseError) {
+                console.error('Error al liberar la conexión:', releaseError);
+            }
         }
         
-        console.error('Error al obtener las evaluaciones:', error);
         res.status(500).json({
             success: false,
             message: 'Error al obtener las evaluaciones',
-            error: error.message,
-            sqlState: error.sqlState,
-            sqlMessage: error.sqlMessage
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Error interno del servidor',
+            ...(process.env.NODE_ENV === 'development' && { 
+                details: error.detail,
+                hint: error.hint,
+                code: error.code,
+                stack: error.stack
+            })
         });
     }
 });
