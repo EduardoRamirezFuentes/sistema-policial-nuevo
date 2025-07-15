@@ -770,19 +770,7 @@
             elementExists('#chartError');
             
             console.log('Inicialización completada');
-            if (testBtn) {
-                testBtn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    console.log('Botón de prueba clickeado');
-                    if (typeof cargarGraficaEstadoOficiales === 'function') {
-                        console.log('Llamando a cargarGraficaEstadoOficiales...');
-                        cargarGraficaEstadoOficiales();
-                    } else {
-                        console.error('Error: La función cargarGraficaEstadoOficiales no está definida');
-                    }
-                });
-                console.log('Manejador de eventos del botón de prueba asignado');
-            }
+            // Código de inicialización completado
         });
     </script>
     
