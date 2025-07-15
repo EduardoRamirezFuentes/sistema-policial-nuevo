@@ -18,6 +18,12 @@ const fetchOptions = {
   }
 };
 
+// Configurar axios globalmente si es necesario
+if (typeof axios !== 'undefined') {
+    axios.defaults.withCredentials = true;
+    axios.defaults.headers.common['Accept'] = 'application/json';
+}
+
 // Función para realizar peticiones con manejo de errores mejorado
 async function fetchWithTimeout(resource, options = {}) {
   const timeout = 30000; // 30 segundos de timeout
@@ -2563,21 +2569,31 @@ if (policiaForm) {
             }
             
             try {
-                // Usar fetchWithTimeout para la petición
-                const response = await fetchWithTimeout(`${API_BASE_URL}/oficiales`, {
+                console.log('Preparando para enviar datos al servidor...');
+                
+                // Usar fetch directamente para tener más control
+                const response = await fetch(`${API_BASE_URL}/oficiales`, {
                     method: 'POST',
                     body: formDataToSend,
                     credentials: 'include',
-                    // No establecer Content-Type manualmente cuando se usa FormData,
-                    // el navegador lo hará automáticamente con el boundary correcto
+                    mode: 'cors',
+                    // No establecer Content-Type manualmente cuando se usa FormData
                     headers: {
                         'Accept': 'application/json'
                     }
+                }).catch(error => {
+                    console.error('Error en la petición fetch:', error);
+                    throw new Error(`Error de red: ${error.message}`);
                 });
                 
-                console.log('Respuesta del servidor recibida:', response.status, response.statusText);
+                console.log('Respuesta del servidor recibida. Estado:', response.status, response.statusText);
                 
-                console.log('Respuesta del servidor:', response.status, response.statusText);
+                // Verificar si la respuesta es OK
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Error en la respuesta del servidor:', response.status, errorText);
+                    throw new Error(`Error del servidor: ${response.status} ${response.statusText}\n${errorText}`);
+                }
                 
                 // Intentar obtener el cuerpo de la respuesta como JSON
                 let data;
@@ -2588,7 +2604,7 @@ if (policiaForm) {
                     console.error('Error al analizar la respuesta JSON:', jsonError);
                     const text = await response.text();
                     console.error('Respuesta del servidor (texto):', text);
-                    throw new Error('Error en la respuesta del servidor: ' + text);
+                    throw new Error('Error al procesar la respuesta del servidor');
                 }
                 
                 if (!response.ok) {
