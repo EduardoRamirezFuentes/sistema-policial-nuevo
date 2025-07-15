@@ -16,9 +16,30 @@ const allowedOrigins = [
   'http://localhost:8080'
 ];
 
+// Middleware CORS personalizado
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Verificar si el origen está permitido
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+    res.header('Access-Control-Allow-Credentials', 'true');
+  }
+  
+  // Manejar solicitud OPTIONS (preflight)
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  next();
+});
+
+// Configuración CORS para rutas específicas
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -27,9 +48,11 @@ const corsOptions = {
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
+  preflightContinue: false
 };
 
+// Aplicar CORS a todas las rutas
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
@@ -180,23 +203,19 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Ruta para guardar un nuevo oficial
 app.post('/api/oficiales', upload.single('pdfFile'), async (req, res) => {
-    // Configurar encabezados CORS para la respuesta
-    const origin = req.headers.origin;
-    if (allowedOrigins.includes(origin)) {
-        res.header('Access-Control-Allow-Origin', origin);
-    }
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-    res.header('Access-Control-Allow-Credentials', 'true');
-    
-    // Manejar solicitud OPTIONS (preflight)
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-    
     console.log('Solicitud POST recibida en /api/oficiales');
-    console.log('Cuerpo de la solicitud (body):', req.body);
-    console.log('Archivo adjunto:', req.file);
+    console.log('Headers:', req.headers);
+    console.log('Body:', req.body);
+    console.log('Archivo:', req.file);
+    
+    // Verificar si hay un archivo
+    if (!req.file) {
+        console.log('No se recibió ningún archivo');
+        return res.status(400).json({ 
+            success: false, 
+            message: 'Por favor, suba un archivo PDF válido' 
+        });
+    }
     
     let connection;
     
@@ -245,6 +264,10 @@ app.post('/api/oficiales', upload.single('pdfFile'), async (req, res) => {
             throw new Error('El formato de fecha debe ser YYYY-MM-DD');
         }
 
+        // Limpiar números de teléfono (solo dígitos)
+        const telefonoContacto = req.body.telefonoContacto.replace(/\D/g, '');
+        const telefonoEmergencia = req.body.telefonoEmergencia.replace(/\D/g, '');
+
         // Crear objeto con los datos del oficial
         const oficialData = {
             nombre_completo: req.body.nombreCompleto,
@@ -259,23 +282,22 @@ app.post('/api/oficiales', upload.single('pdfFile'), async (req, res) => {
             cargo_actual: req.body.cargoActual,
             fecha_ingreso: req.body.fechaIngreso,
             escolaridad: req.body.escolaridad,
-            telefono_contacto: req.body.telefonoContacto.replace(/\D/g, ''), // Solo números
-            telefono_emergencia: req.body.telefonoEmergencia.replace(/\D/g, ''), // Solo números
+            telefono_contacto: telefonoContacto,
+            telefono_emergencia: telefonoEmergencia,
             funcion: req.body.funcion,
             pdf_nombre_archivo: req.file ? req.file.filename : null,
             pdf_tipo: req.file ? req.file.mimetype : null,
             pdf_tamanio: req.file ? req.file.size : null,
             usuario_registro: 1, // ID del usuario administrador
-            activo: 1
+            activo: 1,
+            fecha_registro: new Date()
         };
 
         console.log('Datos del oficial a insertar:', JSON.stringify(oficialData, null, 2));
-
-        console.log('Datos a insertar en la base de datos:', oficialData);
         
-        // Primero verificar si ya existe un registro con la misma CURP, CUIP o CUP
+        // Verificar si ya existe un registro con la misma CURP, CUIP o CUP
         const [existing] = await connection.query(
-            `SELECT id FROM oficiales WHERE curp = ? OR cuip = ? OR cup = ? LIMIT 1`,
+            'SELECT id FROM oficiales WHERE curp = ? OR cuip = ? OR cup = ?',
             [oficialData.curp, oficialData.cuip, oficialData.cup]
         );
 
@@ -286,14 +308,19 @@ app.post('/api/oficiales', upload.single('pdfFile'), async (req, res) => {
         // Insertar el nuevo registro
         const [result] = await connection.query('INSERT INTO oficiales SET ?', [oficialData]);
         
+        // Confirmar la transacción
         await connection.commit();
         
         console.log('Registro insertado correctamente. ID:', result.insertId);
         
+        // Enviar respuesta exitosa
         res.json({ 
             success: true, 
             message: 'Oficial registrado exitosamente',
-            id: result.insertId
+            data: {
+                id: result.insertId,
+                ...oficialData
+            }
         });
     } catch (error) {
         console.error('Error al procesar la solicitud:');

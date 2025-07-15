@@ -6,7 +6,7 @@ if (typeof Chart === 'undefined') {
 }
 
 // Configuración de la API
-const API_BASE_URL = 'https://sistema-policial.onrender.com/api';
+const API_BASE_URL = 'https://sistema-policial.onrender.com';
 
 // Configuración de las opciones de fetch por defecto
 const fetchOptions = {
