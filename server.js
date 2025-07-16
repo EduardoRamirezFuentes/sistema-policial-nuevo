@@ -1001,6 +1001,62 @@ app.get('/api/oficiales/buscar', async (req, res) => {
 });
 
 // Ruta de prueba de conexión
+// Ruta para buscar oficiales
+app.get('/api/oficiales/buscar', async (req, res) => {
+    const { termino } = req.query;
+    
+    if (!termino || termino.trim() === '') {
+        return res.status(400).json({
+            success: false,
+            message: 'Debe proporcionar un término de búsqueda',
+            error: 'Término de búsqueda vacío'
+        });
+    }
+
+    const searchTerm = `%${termino}%`;
+    let connection;
+
+    try {
+        connection = await pool.connect();
+        
+        const query = `
+            SELECT id, nombre_completo, curp, cuip, cup, grado, area_adscripcion, fecha_ingreso
+            FROM oficiales
+            WHERE 
+                nombre_completo ILIKE $1 OR
+                curp ILIKE $1 OR
+                cuip ILIKE $1 OR
+                cup ILIKE $1
+            ORDER BY nombre_completo
+            LIMIT 50
+        `;
+        
+        const result = await connection.query(query, [searchTerm]);
+        
+        res.json({
+            success: true,
+            data: result.rows,
+            count: result.rowCount
+        });
+        
+    } catch (error) {
+        console.error('Error al buscar oficiales:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al realizar la búsqueda',
+            error: error.message
+        });
+    } finally {
+        if (connection) {
+            try {
+                await connection.release();
+            } catch (releaseError) {
+                console.error('Error al liberar la conexión:', releaseError);
+            }
+        }
+    }
+});
+
 app.get('/api/test', async (req, res) => {
     try {
         const connection = await pool.getConnection();
