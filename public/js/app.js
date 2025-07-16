@@ -1843,6 +1843,16 @@ async function buscarOficialEstatusPoli(termino) {
 // Función para mostrar los resultados de la búsqueda en tarjetas
 function mostrarResultadosEstatusPoli(oficiales) {
     console.log('Mostrando resultados de búsqueda:', oficiales);
+    // Depuración: verificar si los oficiales tienen el campo pdf_nombre_archivo
+    oficiales.forEach((oficial, index) => {
+        console.log(`Oficial ${index + 1}:`, {
+            id: oficial.id,
+            nombre: oficial.nombre_completo,
+            tienePDF: !!oficial.pdf_nombre_archivo,
+            pdf_nombre_archivo: oficial.pdf_nombre_archivo
+        });
+    });
+    
     const contenedorTarjetas = document.getElementById('contenedorTarjetas');
     const cuerpoTabla = document.getElementById('cuerpoTabla');
     const resultadoBusqueda = document.getElementById('resultadoBusqueda');
@@ -1939,12 +1949,13 @@ function mostrarResultadosEstatusPoli(oficiales) {
                             ${estaActivo ? 'Desactivar' : 'Activar'}
                         </button>
                     </div>
-                    ${oficial.pdf_nombre_archivo ? `
+                    ${(oficial.pdf_nombre_archivo || oficial.pdf_url) ? `
                     <div class="d-grid">
-                        <a href="/api/descargar-pdf/${oficial.id}" 
+                        <a href="${oficial.pdf_url || `/api/descargar-pdf/${oficial.id}`}" 
                            class="btn btn-sm btn-outline-info"
                            target="_blank"
-                           onclick="event.stopPropagation(); window.open(this.href, '_blank'); return false;">
+                           onclick="event.stopPropagation(); window.open(this.href, '_blank'); return false;"
+                           title="${oficial.pdf_nombre_archivo || 'Documento PDF'}">
                             <i class="fas fa-file-pdf me-1"></i> Ver Documento PDF
                         </a>
                     </div>` : 
