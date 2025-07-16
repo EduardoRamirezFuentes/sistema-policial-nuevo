@@ -323,27 +323,31 @@ app.get('/api/descargar-pdf/:idOficial', async (req, res) => {
             });
         }
         
-        // Configurar las cabeceras para la descarga
+        // Configurar las cabeceras para la visualización en el navegador
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `inline; filename="${decodedFileName}"`);
+        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(oficial.pdf_nombre_archivo)}"`);
         res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'no-cache');
         
         console.log('Enviando archivo:', filePath);
         
         // Usar stream para enviar el archivo con manejo de errores
         const fileStream = fs.createReadStream(filePath);
-        fileStream.pipe(res);
         
+        // Manejar errores del stream
         fileStream.on('error', (error) => {
             console.error('Error al leer el archivo:', error);
             if (!res.headersSent) {
                 res.status(500).json({
                     success: false,
-                    message: 'Error al leer el archivo',
+                    message: 'Error al leer el archivo PDF',
                     error: error.message
                 });
             }
         });
+        
+        // Enviar el archivo
+        fileStream.pipe(res);
         
     } catch (error) {
         console.error('Error al procesar la solicitud de descarga:', error);
