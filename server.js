@@ -1018,12 +1018,9 @@ app.get('/api/oficiales/buscar', async (req, res) => {
     }
 
     const searchTerm = `%${termino}%`;
-    let connection;
+    const client = await pool.connect();
 
     try {
-        console.log('Obteniendo conexión a la base de datos...');
-        connection = await pool.connect();
-        
         console.log('Conexión establecida, ejecutando consulta...');
         const query = `
             SELECT id, nombre_completo, curp, cuip, cup, grado, area_adscripcion, fecha_ingreso
@@ -1040,7 +1037,7 @@ app.get('/api/oficiales/buscar', async (req, res) => {
         console.log('Consulta SQL:', query.replace(/\s+/g, ' ').trim());
         console.log('Parámetros:', [searchTerm]);
         
-        const result = await connection.query(query, [searchTerm]);
+        const result = await client.query(query, [searchTerm]);
         
         console.log(`Búsqueda completada. ${result.rowCount} resultados encontrados.`);
         
@@ -1069,15 +1066,8 @@ app.get('/api/oficiales/buscar', async (req, res) => {
             detail: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     } finally {
-        if (connection) {
-            try {
-                console.log('Liberando conexión...');
-                await connection.release();
-                console.log('Conexión liberada');
-            } catch (releaseError) {
-                console.error('Error al liberar la conexión:', releaseError);
-            }
-        }
+        client.release();
+        console.log('Conexión liberada');
         console.log('=== Búsqueda finalizada ===\n');
     }
 });
