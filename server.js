@@ -557,15 +557,11 @@ app.post('/api/oficiales', upload.single('pdfFile'), async (req, res) => {
     }
 });
 
-// Ruta para cargar la página de formación
-app.get('/formacion', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'formacion.html'));
-});
-
 // Ruta para guardar un registro de formación
-app.post('/api/formacion', express.json(), async (req, res) => {
+app.post('/api/formacion', upload.single('archivo'), async (req, res) => {
     const formacion = req.body;
-    let connection;
+    const archivo = req.file;
+    let client;
     
     // Validar que se haya proporcionado el ID del oficial
     if (!formacion.id_oficial) {
@@ -576,108 +572,160 @@ app.post('/api/formacion', express.json(), async (req, res) => {
     }
     
     try {
-        connection = await pool.getConnection();
-        await connection.beginTransaction();
+        client = await pool.connect();
+        await client.query('BEGIN');
         
         // Verificar que el oficial exista
-        const [oficial] = await connection.query(
-            'SELECT id FROM oficiales WHERE id = ?',
+        const oficialResult = await client.query(
+            'SELECT id FROM oficiales WHERE id = $1',
             [formacion.id_oficial]
         );
         
-        if (oficial.length === 0) {
-            await connection.rollback();
+        if (oficialResult.rows.length === 0) {
+            await client.query('ROLLBACK');
             return res.status(404).json({ 
                 success: false, 
                 message: 'El oficial especificado no existe' 
             });
         }
         
-        // Insertar el registro de formación
-        const [result] = await connection.query(
-            'INSERT INTO formacion (id_oficial, curso, tipo_curso, institucion, fecha_curso, resultado) VALUES (?, ?, ?, ?, ?, ?)',
+        // Guardar el archivo si se proporcionó
+        let rutaArchivo = null;
+        if (archivo) {
+            rutaArchivo = `/uploads/${archivo.filename}`;
+        }
+        
+        // Insertar el registro de formación en la base de datos
+        const result = await client.query(
+            'INSERT INTO formacion (id_oficial, curso, tipo_curso, institucion, fecha_curso, resultado_curso, ruta_archivo) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
             [
                 formacion.id_oficial,
                 formacion.curso, 
                 formacion.tipo_curso, 
                 formacion.institucion, 
                 formacion.fecha_curso, 
-                formacion.resultado_curso
+                formacion.resultado_curso,
+                rutaArchivo
             ]
         );
         
-        await connection.commit();
+        await client.query('COMMIT');
         res.status(201).json({ 
             success: true, 
             message: 'Registro de formación guardado exitosamente',
-            id: result.insertId 
+            id: result.rows[0].id
         });
     } catch (error) {
-        if (connection) await connection.rollback();
         console.error('Error al guardar el registro de formación:', error);
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                console.error('Error al hacer rollback:', rollbackError);
+            }
+        }
         res.status(500).json({ 
             success: false, 
             message: 'Error al guardar el registro de formación',
-            error: error.message 
+            error: error.message,
+            code: error.code,
+            detail: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     } finally {
-        if (connection) connection.release();
+        if (client) {
+            try {
+                client.release();
+                console.log('Conexión de formación liberada');
+            } catch (releaseError) {
+                console.error('Error al liberar la conexión de formación:', releaseError);
+            }
+        }
     }
 });
 
 // Ruta para obtener todos los registros de formación
 app.get('/api/formacion', async (req, res) => {
     const { id_oficial } = req.query;
-    let query = 'SELECT f.*, o.nombre_completo AS nombre_oficial FROM formacion f ';
-    query += 'LEFT JOIN oficiales o ON f.id_oficial = o.id ';
-    
-    const params = [];
-    
-    if (id_oficial) {
-        query += 'WHERE f.id_oficial = ? ';
-        params.push(id_oficial);
-    }
-    
-    query += 'ORDER BY f.fecha_curso DESC';
+    let client;
     
     try {
-        const [rows] = await pool.query(query, params);
-        res.json({ success: true, data: rows });
+        client = await pool.connect();
+        
+        let query = 'SELECT f.*, o.nombre_completo AS nombre_oficial FROM formacion f ';
+        query += 'LEFT JOIN oficiales o ON f.id_oficial = o.id ';
+        
+        const params = [];
+        
+        if (id_oficial) {
+            query += 'WHERE f.id_oficial = $1 ';
+            params.push(id_oficial);
+        }
+        
+        query += 'ORDER BY f.fecha_curso DESC';
+        
+        const result = await client.query(query, params);
+        res.json({ success: true, data: result.rows });
     } catch (error) {
         console.error('Error al obtener los registros de formación:', error);
         res.status(500).json({ 
             success: false, 
             message: 'Error al obtener los registros de formación',
-            error: error.message 
+            error: error.message,
+            code: error.code,
+            detail: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
+    } finally {
+        if (client) {
+            try {
+                client.release();
+                console.log('Conexión de consulta de formación liberada');
+            } catch (releaseError) {
+                console.error('Error al liberar la conexión de formación:', releaseError);
+            }
+        }
     }
 });
 
 // Ruta para obtener competencias básicas
 app.get('/api/competencias', async (req, res) => {
     const { id_oficial } = req.query;
-    let query = 'SELECT c.*, o.nombre_completo AS nombre_oficial FROM competencias_basicas c ';
-    query += 'LEFT JOIN oficiales o ON c.id_oficial = o.id ';
-    
-    const params = [];
-    
-    if (id_oficial) {
-        query += 'WHERE c.id_oficial = ? ';
-        params.push(id_oficial);
-    }
-    
-    query += 'ORDER BY c.fecha DESC';
+    let client;
     
     try {
-        const [rows] = await pool.query(query, params);
-        res.json({ success: true, data: rows });
+        client = await pool.connect();
+        
+        let query = 'SELECT c.*, o.nombre_completo AS nombre_oficial FROM competencias_basicas c ';
+        query += 'LEFT JOIN oficiales o ON c.id_oficial = o.id ';
+        
+        const params = [];
+        
+        if (id_oficial) {
+            query += 'WHERE c.id_oficial = $1 ';
+            params.push(id_oficial);
+        }
+        
+        query += 'ORDER BY c.fecha DESC';
+        
+        const result = await client.query(query, params);
+        res.json({ success: true, data: result.rows });
     } catch (error) {
         console.error('Error al obtener las competencias básicas:', error);
         res.status(500).json({ 
             success: false, 
             message: 'Error al obtener las competencias básicas',
-            error: error.message 
+            error: error.message,
+            code: error.code,
+            detail: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
+    } finally {
+        if (client) {
+            try {
+                client.release();
+                console.log('Conexión de consulta de competencias liberada');
+            } catch (releaseError) {
+                console.error('Error al liberar la conexión de competencias:', releaseError);
+            }
+        }
     }
 });
 
@@ -685,7 +733,7 @@ app.get('/api/competencias', async (req, res) => {
 app.post('/api/competencias', upload.single('archivo_pdf'), async (req, res) => {
     const competencia = req.body;
     const archivo = req.file;
-    let connection;
+    let client;
     
     // Validar que se haya proporcionado el ID del oficial
     if (!competencia.id_oficial) {
@@ -696,17 +744,17 @@ app.post('/api/competencias', upload.single('archivo_pdf'), async (req, res) => 
     }
     
     try {
-        connection = await pool.getConnection();
-        await connection.beginTransaction();
+        client = await pool.connect();
+        await client.query('BEGIN');
         
         // Verificar que el oficial exista
-        const [oficial] = await connection.query(
-            'SELECT id FROM oficiales WHERE id = ?',
+        const oficialResult = await client.query(
+            'SELECT id FROM oficiales WHERE id = $1',
             [competencia.id_oficial]
         );
         
-        if (oficial.length === 0) {
-            await connection.rollback();
+        if (oficialResult.rows.length === 0) {
+            await client.query('ROLLBACK');
             return res.status(404).json({ 
                 success: false, 
                 message: 'El oficial especificado no existe' 
@@ -720,8 +768,11 @@ app.post('/api/competencias', upload.single('archivo_pdf'), async (req, res) => 
         }
         
         // Insertar la competencia en la base de datos
-        const [result] = await connection.query(
-            'INSERT INTO competencias_basicas (id_oficial, fecha, institucion, resultado, vigencia, enlace_constancia, ruta_archivo) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        const result = await client.query(
+            `INSERT INTO competencias_basicas 
+             (id_oficial, fecha, institucion, resultado, vigencia, enlace_constancia, ruta_archivo) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7) 
+             RETURNING id`,
             [
                 competencia.id_oficial,
                 competencia.fecha_competencia,
@@ -733,28 +784,44 @@ app.post('/api/competencias', upload.single('archivo_pdf'), async (req, res) => 
             ]
         );
         
-        await connection.commit();
+        await client.query('COMMIT');
         res.status(201).json({ 
             success: true, 
             message: 'Competencia básica guardada exitosamente',
-            id: result.insertId 
+            id: result.rows[0].id
         });
     } catch (error) {
-        if (connection) await connection.rollback();
         console.error('Error al guardar la competencia básica:', error);
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                console.error('Error al hacer rollback:', rollbackError);
+            }
+        }
         res.status(500).json({ 
             success: false, 
             message: 'Error al guardar la competencia básica',
-            error: error.message 
+            error: error.message,
+            code: error.code,
+            detail: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     } finally {
-        if (connection) connection.release();
+        if (client) {
+            try {
+                client.release();
+                console.log('Conexión de competencias liberada');
+            } catch (releaseError) {
+                console.error('Error al liberar la conexión de competencias:', releaseError);
+            }
+        }
     }
 });
 
 // Ruta para guardar una evaluación
 app.post('/api/evaluaciones', express.json(), async (req, res) => {
     const evaluacion = req.body;
+    let client;
     
     // Validar datos de entrada
     if (!evaluacion.id_oficial || !evaluacion.tipo_evaluacion || !evaluacion.fecha_evaluacion || !evaluacion.evaluador) {
@@ -764,16 +831,30 @@ app.post('/api/evaluaciones', express.json(), async (req, res) => {
         });
     }
     
-    let connection;
     try {
-        connection = await pool.getConnection();
-        await connection.beginTransaction();
+        client = await pool.connect();
+        await client.query('BEGIN');
+        
+        // Verificar que el oficial exista
+        const oficialResult = await client.query(
+            'SELECT id FROM oficiales WHERE id = $1',
+            [evaluacion.id_oficial]
+        );
+        
+        if (oficialResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ 
+                success: false, 
+                message: 'El oficial especificado no existe' 
+            });
+        }
         
         // Insertar la evaluación en la base de datos
-        const [result] = await connection.execute(
+        const result = await client.query(
             `INSERT INTO evaluaciones 
              (id_oficial, tipo_evaluacion, fecha_evaluacion, calificacion, evaluador, observaciones, usuario_registro)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id`,
             [
                 evaluacion.id_oficial,
                 evaluacion.tipo_evaluacion,
@@ -785,42 +866,53 @@ app.post('/api/evaluaciones', express.json(), async (req, res) => {
             ]
         );
         
-        await connection.commit();
-        connection.release();
+        await client.query('COMMIT');
         
         res.status(201).json({
             success: true,
             message: 'Evaluación guardada correctamente',
-            id: result.insertId
+            id: result.rows[0].id
         });
         
     } catch (error) {
-        if (connection) {
-            await connection.rollback();
-            connection.release();
+        console.error('Error al guardar la evaluación:', error);
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                console.error('Error al hacer rollback:', rollbackError);
+            }
         }
         
-        console.error('Error al guardar la evaluación:', error);
         res.status(500).json({
             success: false,
             message: 'Error al guardar la evaluación',
             error: error.message,
-            sqlState: error.sqlState,
-            sqlMessage: error.sqlMessage
+            code: error.code,
+            detail: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
+    } finally {
+        if (client) {
+            try {
+                client.release();
+                console.log('Conexión de evaluación liberada');
+            } catch (releaseError) {
+                console.error('Error al liberar la conexión de evaluación:', releaseError);
+            }
+        }
     }
 });
 
 // Ruta para obtener las evaluaciones
 app.get('/api/evaluaciones', async (req, res) => {
-    let connection;
+    let client;
     try {
         console.log('Obteniendo conexión a la base de datos...');
-        connection = await pool.getConnection();
+        client = await pool.connect();
         console.log('Conexión a la base de datos establecida');
         
         console.log('Ejecutando consulta de evaluaciones...');
-        const [evaluaciones] = await connection.query(
+        const result = await client.query(
             `SELECT e.*, o.nombre_completo as nombre_oficial,
                     'Sistema' as nombre_usuario
              FROM evaluaciones e
@@ -828,20 +920,14 @@ app.get('/api/evaluaciones', async (req, res) => {
              ORDER BY e.fecha_evaluacion DESC, e.fecha_registro DESC`
         );
         
-        console.log(`Se encontraron ${evaluaciones.length} evaluaciones`);
+        console.log(`Se encontraron ${result.rows.length} evaluaciones`);
         
         // Formatear fechas para mostrarlas correctamente
-        const evaluacionesFormateadas = evaluaciones.map(eval => ({
-            ...eval,
-            fecha_evaluacion: eval.fecha_evaluacion ? new Date(eval.fecha_evaluacion).toISOString().split('T')[0] : null,
-            fecha_registro: eval.fecha_registro ? new Date(eval.fecha_registro).toISOString() : null
+        const evaluacionesFormateadas = result.rows.map(evalItem => ({
+            ...evalItem,
+            fecha_evaluacion: evalItem.fecha_evaluacion ? new Date(evalItem.fecha_evaluacion).toISOString().split('T')[0] : null,
+            fecha_registro: evalItem.fecha_registro ? new Date(evalItem.fecha_registro).toISOString() : null
         }));
-        
-        // Liberar la conexión antes de enviar la respuesta
-        if (connection) {
-            await connection.release();
-            console.log('Conexión liberada');
-        }
         
         res.json({
             success: true,
@@ -857,16 +943,6 @@ app.get('/api/evaluaciones', async (req, res) => {
         if (error.detail) console.error('- Detalles:', error.detail);
         if (error.hint) console.error('- Sugerencia:', error.hint);
         
-        // Asegurarse de liberar la conexión en caso de error
-        if (connection) {
-            try {
-                await connection.release(true); // Forzar la liberación
-                console.log('Conexión liberada después del error');
-            } catch (releaseError) {
-                console.error('Error al liberar la conexión:', releaseError);
-            }
-        }
-        
         res.status(500).json({
             success: false,
             message: 'Error al obtener las evaluaciones',
@@ -878,6 +954,15 @@ app.get('/api/evaluaciones', async (req, res) => {
                 stack: error.stack
             })
         });
+    } finally {
+        if (client) {
+            try {
+                client.release();
+                console.log('Conexión de consulta de evaluaciones liberada');
+            } catch (releaseError) {
+                console.error('Error al liberar la conexión de evaluaciones:', releaseError);
+            }
+        }
     }
 });
 
@@ -885,74 +970,149 @@ app.get('/api/evaluaciones', async (req, res) => {
 app.put('/api/oficiales/:id/estado', async (req, res) => {
     const { id } = req.params;
     const { activo } = req.body;
+    let client;
     
     if (activo === undefined) {
         return res.status(400).json({ success: false, message: 'El campo activo es requerido' });
     }
     
     try {
-        const [result] = await pool.query(
-            'UPDATE oficiales SET activo = ? WHERE id = ?',
+        client = await pool.connect();
+        await client.query('BEGIN');
+        
+        // Verificar que el oficial exista
+        const oficialResult = await client.query(
+            'SELECT id FROM oficiales WHERE id = $1',
+            [id]
+        );
+        
+        if (oficialResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ 
+                success: false, 
+                message: 'El oficial especificado no existe' 
+            });
+        }
+        
+        // Actualizar el estado del oficial
+        const result = await client.query(
+            'UPDATE oficiales SET activo = $1, fecha_actualizacion = NOW() WHERE id = $2 RETURNING id',
             [activo, id]
         );
         
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ success: false, message: 'Oficial no encontrado' });
+        if (result.rowCount === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ 
+                success: false, 
+                message: 'No se pudo actualizar el estado del oficial' 
+            });
         }
         
-        res.json({ success: true, message: 'Estado actualizado correctamente' });
+        await client.query('COMMIT');
+        
+        res.json({ 
+            success: true, 
+            message: 'Estado actualizado correctamente',
+            data: {
+                id: result.rows[0].id,
+                activo: activo
+            }
+        });
+        
     } catch (error) {
         console.error('Error al actualizar el estado del oficial:', error);
-        res.status(500).json({ success: false, message: 'Error al actualizar el estado del oficial' });
+        
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                console.error('Error al hacer rollback:', rollbackError);
+            }
+        }
+        
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error al actualizar el estado del oficial',
+            error: error.message,
+            code: error.code,
+            detail: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    } finally {
+        if (client) {
+            try {
+                client.release();
+                console.log('Conexión de actualización de estado liberada');
+            } catch (releaseError) {
+                console.error('Error al liberar la conexión de actualización de estado:', releaseError);
+            }
+        }
     }
 });
 
 // Ruta para obtener estadísticas de oficiales (activos e inactivos)
 app.get('/api/oficiales/estadisticas', async (req, res) => {
     console.log('Solicitud recibida en /api/oficiales/estadisticas');
-    let connection;
+    let client;
     try {
         console.log('Obteniendo conexión a la base de datos...');
-        connection = await pool.getConnection();
+        client = await pool.connect();
         console.log('Conexión a la base de datos establecida');
         
         // Contar oficiales activos
         console.log('Contando oficiales activos...');
-        const [activos] = await connection.query(
-            'SELECT COUNT(*) as count FROM oficiales WHERE activo = 1'
+        const activosResult = await client.query(
+            'SELECT COUNT(*) as count FROM oficiales WHERE activo = true'
         );
-        console.log('Oficiales activos:', activos[0].count);
+        const activos = parseInt(activosResult.rows[0].count, 10);
+        console.log('Oficiales activos:', activos);
         
         // Contar oficiales inactivos
         console.log('Contando oficiales inactivos...');
-        const [inactivos] = await connection.query(
-            'SELECT COUNT(*) as count FROM oficiales WHERE activo = 0 OR activo IS NULL'
+        const inactivosResult = await client.query(
+            'SELECT COUNT(*) as count FROM oficiales WHERE activo = false OR activo IS NULL'
         );
-        console.log('Oficiales inactivos:', inactivos[0].count);
+        const inactivos = parseInt(inactivosResult.rows[0].count, 10);
+        console.log('Oficiales inactivos:', inactivos);
         
         const result = {
-            activos: activos[0].count,
-            inactivos: inactivos[0].count
+            activos,
+            inactivos,
+            total: activos + inactivos
         };
         
-        console.log('Enviando respuesta:', result);
-        res.json(result);
+        res.json({
+            success: true,
+            data: result
+        });
         
     } catch (error) {
-        console.error('Error al obtener estadísticas de oficiales:');
-        console.error('Mensaje de error:', error.message);
-        console.error('Stack trace:', error.stack);
+        console.error('Error al obtener las estadísticas de oficiales:');
+        console.error('- Mensaje:', error.message);
+        console.error('- Stack:', error.stack);
         
-        res.status(500).json({ 
-            success: false, 
-            message: 'Error al obtener estadísticas de oficiales',
-            error: error.message,
-            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        if (error.code) console.error('- Código de error:', error.code);
+        if (error.detail) console.error('- Detalles:', error.detail);
+        if (error.hint) console.error('- Sugerencia:', error.hint);
+        
+        res.status(500).json({
+            success: false,
+            message: 'Error al obtener las estadísticas de oficiales',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Error interno del servidor',
+            ...(process.env.NODE_ENV === 'development' && { 
+                details: error.detail,
+                hint: error.hint,
+                code: error.code,
+                stack: error.stack
+            })
         });
     } finally {
-        if (connection) {
-            console.log('Liberando conexión a la base de datos...');
-            await connection.release();
+        if (client) {
+            try {
+                client.release();
+                console.log('Conexión de estadísticas liberada');
+            } catch (releaseError) {
+                console.error('Error al liberar la conexión de estadísticas:', releaseError);
+            }
         }
     }
 });
@@ -1066,29 +1226,46 @@ app.get('/api/oficiales/buscar', async (req, res) => {
             detail: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     } finally {
-        client.release();
-        console.log('Conexión liberada');
+        if (client) {
+            try {
+                client.release();
+                console.log('Conexión liberada correctamente');
+            } catch (releaseError) {
+                console.error('Error al liberar la conexión:', releaseError);
+            }
+        }
         console.log('=== Búsqueda finalizada ===\n');
     }
 });
 
 app.get('/api/test', async (req, res) => {
+    let client;
     try {
-        const connection = await pool.getConnection();
-        const [rows] = await connection.query('SELECT 1 as test');
-        connection.release();
+        client = await pool.connect();
+        const result = await client.query('SELECT 1 as test');
         res.json({ 
             success: true, 
             message: 'Conexión exitosa a la base de datos', 
-            data: rows 
+            data: result.rows 
         });
     } catch (error) {
         console.error('Error en la conexión a la base de datos:', error);
         res.status(500).json({ 
             success: false, 
             message: 'Error al conectar con la base de datos', 
-            error: error.message 
+            error: error.message,
+            code: error.code,
+            detail: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
+    } finally {
+        if (client) {
+            try {
+                client.release();
+                console.log('Conexión de prueba liberada');
+            } catch (releaseError) {
+                console.error('Error al liberar la conexión de prueba:', releaseError);
+            }
+        }
     }
 });
 
