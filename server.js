@@ -1119,54 +1119,11 @@ app.get('/api/oficiales/estadisticas', async (req, res) => {
 
 // Ruta para buscar oficiales
 app.get('/api/oficiales/buscar', async (req, res) => {
-    const { termino } = req.query;
-    
-    if (!termino) {
-        return res.status(400).json({ 
-            success: false, 
-            message: 'Término de búsqueda requerido' 
-        });
-    }
-    
-    try {
-        const connection = await pool.getConnection();
-        const [rows] = await connection.query(
-            `SELECT id, nombre_completo, curp, cuip, cup, edad, sexo, 
-                    estado_civil, area_adscripcion, grado, cargo_actual, 
-                    fecha_ingreso, escolaridad, telefono_contacto, 
-                    telefono_emergencia, funcion, pdf_nombre_archivo, activo
-             FROM oficiales 
-             WHERE (nombre_completo LIKE ? OR curp LIKE ? OR cuip LIKE ? OR cup LIKE ?)
-             ORDER BY activo DESC, nombre_completo`,
-            [`%${termino}%`, `%${termino}%`, `%${termino}%`, `%${termino}%`]
-        );
-        
-        connection.release();
-        
-        // Mapear resultados para incluir la URL del archivo
-        const resultados = rows.map(oficial => ({
-            ...oficial,
-            pdf_url: oficial.pdf_nombre_archivo ? `/uploads/${oficial.pdf_nombre_archivo}` : null
-        }));
-        
-        res.json({ success: true, data: resultados });
-    } catch (error) {
-        console.error('Error al buscar oficiales:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: 'Error al buscar oficiales',
-            error: error.message 
-        });
-    }
-});
-
-// Ruta de prueba de conexión
-// Ruta para buscar oficiales
-app.get('/api/oficiales/buscar', async (req, res) => {
     console.log('=== Iniciando búsqueda de oficiales ===');
     console.log('Término de búsqueda:', req.query.termino);
     
     const { termino } = req.query;
+    let client;
     
     if (!termino || termino.trim() === '') {
         console.log('Error: Término de búsqueda vacío');
@@ -1177,20 +1134,22 @@ app.get('/api/oficiales/buscar', async (req, res) => {
         });
     }
 
-    const searchTerm = `%${termino}%`;
-    const client = await pool.connect();
-
     try {
+        // Obtener una conexión del pool
+        client = await pool.connect();
         console.log('Conexión establecida, ejecutando consulta...');
+        
+        const searchTerm = `%${termino}%`;
         const query = `
-            SELECT id, nombre_completo, curp, cuip, cup, grado, area_adscripcion, fecha_ingreso
+            SELECT id, nombre_completo, curp, cuip, cup, grado, area_adscripcion, 
+                   fecha_ingreso, pdf_nombre_archivo, activo
             FROM oficiales
             WHERE 
                 nombre_completo ILIKE $1 OR
                 curp ILIKE $1 OR
                 cuip ILIKE $1 OR
                 cup ILIKE $1
-            ORDER BY nombre_completo
+            ORDER BY activo DESC, nombre_completo
             LIMIT 50
         `;
         
@@ -1201,29 +1160,29 @@ app.get('/api/oficiales/buscar', async (req, res) => {
         
         console.log(`Búsqueda completada. ${result.rowCount} resultados encontrados.`);
         
-        res.json({
-            success: true,
-            data: result.rows,
-            count: result.rowCount
+        // Formatear resultados para incluir la URL del archivo PDF
+        const resultados = result.rows.map(oficial => ({
+            ...oficial,
+            pdf_url: oficial.pdf_nombre_archivo ? `/uploads/${oficial.pdf_nombre_archivo}` : null
+        }));
+        
+        res.json({ 
+            success: true, 
+            data: resultados,
+            count: resultados.length
         });
         
     } catch (error) {
-        console.error('❌ Error al buscar oficiales:');
-        console.error('- Mensaje:', error.message);
-        console.error('- Stack:', error.stack);
-        
-        // Si es un error de base de datos, mostrar más detalles
-        if (error.code) {
-            console.error('- Código de error:', error.code);
-            console.error('- Detalle:', error.detail || 'Sin detalles adicionales');
-        }
-        
+        console.error('Error en la búsqueda de oficiales:', error);
         res.status(500).json({
             success: false,
             message: 'Error al realizar la búsqueda',
             error: error.message,
-            code: error.code,
-            detail: process.env.NODE_ENV === 'development' ? error.stack : undefined
+            ...(process.env.NODEENV === 'development' && { 
+                code: error.code,
+                detail: error.detail,
+                stack: error.stack 
+            })
         });
     } finally {
         if (client) {
