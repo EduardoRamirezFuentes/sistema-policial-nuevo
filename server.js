@@ -1003,9 +1003,13 @@ app.get('/api/oficiales/buscar', async (req, res) => {
 // Ruta de prueba de conexión
 // Ruta para buscar oficiales
 app.get('/api/oficiales/buscar', async (req, res) => {
+    console.log('=== Iniciando búsqueda de oficiales ===');
+    console.log('Término de búsqueda:', req.query.termino);
+    
     const { termino } = req.query;
     
     if (!termino || termino.trim() === '') {
+        console.log('Error: Término de búsqueda vacío');
         return res.status(400).json({
             success: false,
             message: 'Debe proporcionar un término de búsqueda',
@@ -1017,8 +1021,10 @@ app.get('/api/oficiales/buscar', async (req, res) => {
     let connection;
 
     try {
+        console.log('Obteniendo conexión a la base de datos...');
         connection = await pool.connect();
         
+        console.log('Conexión establecida, ejecutando consulta...');
         const query = `
             SELECT id, nombre_completo, curp, cuip, cup, grado, area_adscripcion, fecha_ingreso
             FROM oficiales
@@ -1031,7 +1037,12 @@ app.get('/api/oficiales/buscar', async (req, res) => {
             LIMIT 50
         `;
         
+        console.log('Consulta SQL:', query.replace(/\s+/g, ' ').trim());
+        console.log('Parámetros:', [searchTerm]);
+        
         const result = await connection.query(query, [searchTerm]);
+        
+        console.log(`Búsqueda completada. ${result.rowCount} resultados encontrados.`);
         
         res.json({
             success: true,
@@ -1040,20 +1051,34 @@ app.get('/api/oficiales/buscar', async (req, res) => {
         });
         
     } catch (error) {
-        console.error('Error al buscar oficiales:', error);
+        console.error('❌ Error al buscar oficiales:');
+        console.error('- Mensaje:', error.message);
+        console.error('- Stack:', error.stack);
+        
+        // Si es un error de base de datos, mostrar más detalles
+        if (error.code) {
+            console.error('- Código de error:', error.code);
+            console.error('- Detalle:', error.detail || 'Sin detalles adicionales');
+        }
+        
         res.status(500).json({
             success: false,
             message: 'Error al realizar la búsqueda',
-            error: error.message
+            error: error.message,
+            code: error.code,
+            detail: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     } finally {
         if (connection) {
             try {
+                console.log('Liberando conexión...');
                 await connection.release();
+                console.log('Conexión liberada');
             } catch (releaseError) {
                 console.error('Error al liberar la conexión:', releaseError);
             }
         }
+        console.log('=== Búsqueda finalizada ===\n');
     }
 });
 
