@@ -246,31 +246,77 @@ ensureUploadsDir();
 app.get('/api/descargar-pdf/:nombreArchivo', (req, res) => {
     try {
         const { nombreArchivo } = req.params;
-        const filePath = path.join(__dirname, 'uploads', nombreArchivo);
+        const decodedFileName = decodeURIComponent(nombreArchivo);
+        const uploadsDir = path.join(__dirname, 'uploads');
+        const filePath = path.join(uploadsDir, decodedFileName);
+        
+        console.log('=== Solicitud de descarga de PDF ===');
+        console.log('Archivo solicitado:', decodedFileName);
+        console.log('Ruta completa del archivo:', filePath);
+        
+        // Verificar si el directorio de uploads existe
+        if (!fs.existsSync(uploadsDir)) {
+            console.error('El directorio de uploads no existe:', uploadsDir);
+            return res.status(404).json({
+                success: false,
+                message: 'Directorio de archivos no encontrado',
+                path: uploadsDir
+            });
+        }
         
         // Verificar si el archivo existe
         if (!fs.existsSync(filePath)) {
+            console.error('El archivo no existe en la ruta:', filePath);
+            
+            // Listar archivos en el directorio para depuración
+            try {
+                const files = fs.readdirSync(uploadsDir);
+                console.log('Archivos en el directorio uploads:', files);
+            } catch (dirError) {
+                console.error('Error al leer el directorio uploads:', dirError);
+            }
+            
             return res.status(404).json({
                 success: false,
-                message: 'Archivo no encontrado'
+                message: 'Archivo no encontrado',
+                requestedFile: decodedFileName,
+                uploadsDirectory: uploadsDir,
+                filesInDirectory: fs.existsSync(uploadsDir) ? fs.readdirSync(uploadsDir) : []
             });
         }
         
         // Configurar las cabeceras para la descarga
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `inline; filename="${nombreArchivo}"`);
+        res.setHeader('Content-Disposition', `inline; filename="${decodedFileName}"`);
         res.setHeader('Access-Control-Allow-Origin', '*');
         
-        // Enviar el archivo
-        res.sendFile(filePath);
+        console.log('Enviando archivo:', filePath);
+        
+        // Usar stream para enviar el archivo con manejo de errores
+        const fileStream = fs.createReadStream(filePath);
+        fileStream.pipe(res);
+        
+        fileStream.on('error', (error) => {
+            console.error('Error al leer el archivo:', error);
+            if (!res.headersSent) {
+                res.status(500).json({
+                    success: false,
+                    message: 'Error al leer el archivo',
+                    error: error.message
+                });
+            }
+        });
         
     } catch (error) {
-        console.error('Error al descargar el archivo:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al descargar el archivo',
-            error: error.message
-        });
+        console.error('Error al procesar la solicitud de descarga:', error);
+        if (!res.headersSent) {
+            res.status(500).json({
+                success: false,
+                message: 'Error al procesar la solicitud de descarga',
+                error: error.message,
+                stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+            });
+        }
     }
 });
 
