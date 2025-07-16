@@ -217,8 +217,62 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Configuración de archivos estáticos
-app.use(express.static('public'));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Servir archivos estáticos desde la carpeta uploads sin autenticación
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
+    setHeaders: (res, path) => {
+        // Configurar cabeceras para permitir el acceso a los archivos
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+        res.setHeader('Access-Control-Allow-Methods', 'GET');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    }
+}));
+
+// Middleware para asegurar que la carpeta uploads exista
+const ensureUploadsDir = () => {
+    const uploadsDir = path.join(__dirname, 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+        console.log(`Directorio de uploads creado en: ${uploadsDir}`);
+    }
+};
+
+// Asegurar que el directorio de uploads exista al iniciar el servidor
+ensureUploadsDir();
+
+// Ruta para descargar archivos PDF
+app.get('/api/descargar-pdf/:nombreArchivo', (req, res) => {
+    try {
+        const { nombreArchivo } = req.params;
+        const filePath = path.join(__dirname, 'uploads', nombreArchivo);
+        
+        // Verificar si el archivo existe
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({
+                success: false,
+                message: 'Archivo no encontrado'
+            });
+        }
+        
+        // Configurar las cabeceras para la descarga
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="${nombreArchivo}"`);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        
+        // Enviar el archivo
+        res.sendFile(filePath);
+        
+    } catch (error) {
+        console.error('Error al descargar el archivo:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al descargar el archivo',
+            error: error.message
+        });
+    }
+});
 
 // Ruta para guardar un nuevo oficial
 app.post('/api/oficiales', upload.single('pdfFile'), async (req, res) => {
@@ -1161,10 +1215,24 @@ app.get('/api/oficiales/buscar', async (req, res) => {
         console.log(`Búsqueda completada. ${result.rowCount} resultados encontrados.`);
         
         // Formatear resultados para incluir la URL del archivo PDF
-        const resultados = result.rows.map(oficial => ({
-            ...oficial,
-            pdf_url: oficial.pdf_nombre_archivo ? `/uploads/${oficial.pdf_nombre_archivo}` : null
-        }));
+        const resultados = result.rows.map(oficial => {
+            // Construir la URL para la descarga del PDF
+            let pdfUrl = null;
+            if (oficial.pdf_nombre_archivo) {
+                // Usar la ruta de la API para la descarga segura del PDF
+                pdfUrl = `/api/descargar-pdf/${encodeURIComponent(oficial.pdf_nombre_archivo)}`;
+                
+                // Si necesitamos la URL completa en producción
+                if (process.env.NODE_ENV === 'production') {
+                    pdfUrl = `https://${req.get('host')}${pdfUrl}`;
+                }
+            }
+            
+            return {
+                ...oficial,
+                pdf_url: pdfUrl
+            };
+        });
         
         res.json({ 
             success: true, 
