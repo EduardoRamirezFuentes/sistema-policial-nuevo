@@ -1927,16 +1927,28 @@ function mostrarResultadosEstatusPoli(oficiales) {
                         <p class="mb-0"><strong>Emergencia:</strong> ${oficial.telefono_emergencia || 'N/A'}</p>
                     </div>
                 </div>
-                <div class="card-footer bg-transparent border-top-0 d-flex justify-content-between">
-                    <button class="btn btn-sm btn-outline-primary">
-                        <i class="fas fa-eye me-1"></i> Ver Detalles
-                    </button>
-                    <button class="btn btn-sm ${estaActivo ? 'btn-outline-danger' : 'btn-outline-success'} toggle-status" 
-                            data-id="${oficial.id}" 
-                            data-actual="${estaActivo ? 1 : 0}">
-                        <i class="fas ${estaActivo ? 'fa-user-times' : 'fa-user-check'} me-1"></i>
-                        ${estaActivo ? 'Desactivar' : 'Activar'}
-                    </button>
+                <div class="card-footer bg-transparent border-top-0">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <button class="btn btn-sm btn-outline-primary">
+                            <i class="fas fa-eye me-1"></i> Ver Detalles
+                        </button>
+                        <button class="btn btn-sm ${estaActivo ? 'btn-outline-danger' : 'btn-outline-success'} toggle-status" 
+                                data-id="${oficial.id}" 
+                                data-actual="${estaActivo ? 1 : 0}">
+                            <i class="fas ${estaActivo ? 'fa-user-times' : 'fa-user-check'} me-1"></i>
+                            ${estaActivo ? 'Desactivar' : 'Activar'}
+                        </button>
+                    </div>
+                    ${oficial.pdf_nombre_archivo ? `
+                    <div class="d-grid">
+                        <a href="/api/descargar-pdf/${oficial.id}" 
+                           class="btn btn-sm btn-outline-info"
+                           target="_blank"
+                           onclick="event.stopPropagation(); window.open(this.href, '_blank'); return false;">
+                            <i class="fas fa-file-pdf me-1"></i> Ver Documento PDF
+                        </a>
+                    </div>` : 
+                    '<div class="text-center text-muted small">Sin documento adjunto</div>'}
                 </div>
             </div>`;
         
