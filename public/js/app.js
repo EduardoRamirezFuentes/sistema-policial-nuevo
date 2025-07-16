@@ -2929,10 +2929,11 @@ function displaySearchResults(resultados) {
                     
                     <div class="d-flex justify-content-between align-items-center">
                         ${policia.pdf_nombre_archivo ? 
-                            `<a href="/api/descargar-pdf/${encodeURIComponent(policia.pdf_nombre_archivo)}" 
+                            `<a href="/api/descargar-pdf/${policia.id}" 
                               target="_blank" 
                               class="btn btn-primary btn-sm"
-                              onclick="event.preventDefault(); window.open(this.href, '_blank'); return false;">
+                              onclick="event.preventDefault(); window.open(this.href, '_blank'); return false;"
+                              title="${policia.pdf_nombre_archivo}">
                                 <i class="fas fa-file-pdf me-1"></i> Ver Documento PDF
                             </a>` : 
                             '<span class="text-muted"><i class="fas fa-times-circle me-1"></i> Sin documento adjunto</span>'

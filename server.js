@@ -242,25 +242,50 @@ const ensureUploadsDir = () => {
 // Asegurar que el directorio de uploads exista al iniciar el servidor
 ensureUploadsDir();
 
-// Ruta para descargar archivos PDF
-app.get('/api/descargar-pdf/:nombreArchivo', (req, res) => {
+// Ruta para descargar archivos PDF por ID de oficial
+app.get('/api/descargar-pdf/:idOficial', async (req, res) => {
+    let client;
     try {
-        const { nombreArchivo } = req.params;
-        const decodedFileName = decodeURIComponent(nombreArchivo);
+        const { idOficial } = req.params;
+        
+        // Obtener información del oficial desde la base de datos
+        client = await pool.connect();
+        const result = await client.query(
+            'SELECT pdf_nombre_archivo FROM oficiales WHERE id = $1',
+            [idOficial]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Oficial no encontrado'
+            });
+        }
+        
+        const oficial = result.rows[0];
+        
+        if (!oficial.pdf_nombre_archivo) {
+            return res.status(404).json({
+                success: false,
+                message: 'Este oficial no tiene un archivo PDF asociado'
+            });
+        }
+        
         const uploadsDir = path.join(__dirname, 'uploads');
-        const filePath = path.join(uploadsDir, decodedFileName);
+        const filePath = path.join(uploadsDir, oficial.pdf_nombre_archivo);
         
         console.log('=== Solicitud de descarga de PDF ===');
-        console.log('Archivo solicitado:', decodedFileName);
+        console.log('ID del oficial:', idOficial);
+        console.log('Archivo a buscar:', oficial.pdf_nombre_archivo);
         console.log('Ruta completa del archivo:', filePath);
         
         // Verificar si el directorio de uploads existe
         if (!fs.existsSync(uploadsDir)) {
             console.error('El directorio de uploads no existe:', uploadsDir);
-            return res.status(404).json({
+            return res.status(500).json({
                 success: false,
-                message: 'Directorio de archivos no encontrado',
-                path: uploadsDir
+                message: 'Error en la configuración del servidor',
+                error: 'Directorio de uploads no encontrado'
             });
         }
         
@@ -272,16 +297,29 @@ app.get('/api/descargar-pdf/:nombreArchivo', (req, res) => {
             try {
                 const files = fs.readdirSync(uploadsDir);
                 console.log('Archivos en el directorio uploads:', files);
+                
+                // Intentar encontrar un archivo con un nombre similar
+                const fileExists = files.some(file => file === oficial.pdf_nombre_archivo);
+                
+                if (!fileExists) {
+                    // Si no se encuentra el archivo, actualizar la base de datos
+                    console.log('Actualizando base de datos para reflejar que el archivo no existe');
+                    await client.query(
+                        'UPDATE oficiales SET pdf_nombre_archivo = NULL WHERE id = $1',
+                        [idOficial]
+                    );
+                }
             } catch (dirError) {
                 console.error('Error al leer el directorio uploads:', dirError);
             }
             
             return res.status(404).json({
                 success: false,
-                message: 'Archivo no encontrado',
-                requestedFile: decodedFileName,
-                uploadsDirectory: uploadsDir,
-                filesInDirectory: fs.existsSync(uploadsDir) ? fs.readdirSync(uploadsDir) : []
+                message: 'El archivo PDF no se encuentra en el servidor',
+                error: 'Archivo no encontrado',
+                idOficial: idOficial,
+                archivoEsperado: oficial.pdf_nombre_archivo,
+                archivosDisponibles: fs.existsSync(uploadsDir) ? fs.readdirSync(uploadsDir) : []
             });
         }
         
