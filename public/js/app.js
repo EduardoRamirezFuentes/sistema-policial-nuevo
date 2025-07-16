@@ -2781,22 +2781,51 @@ async function searchPolicia(searchTerm) {
         return;
     }
     
+    console.log('Iniciando búsqueda con término:', searchTerm);
+    
     // Mostrar indicador de carga
-    searchResults.innerHTML = '<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Buscando...</span></div></div>';
+    searchResults.innerHTML = '<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Buscando...</span></div><p class="mt-2">Buscando oficiales, por favor espere...</p></div>';
     
     try {
-        const response = await fetch(`${API_BASE_URL}/api/oficiales/buscar?termino=${encodeURIComponent(searchTerm)}`);
+        const url = `${API_BASE_URL}/api/oficiales/buscar?termino=${encodeURIComponent(searchTerm)}`;
+        console.log('URL de búsqueda:', url);
         
-        if (!response.ok) {
-            throw new Error(`Error HTTP: ${response.status}`);
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            },
+            credentials: 'include' // Importante para mantener las cookies de sesión si las hay
+        });
+        
+        console.log('Respuesta del servidor:', response.status, response.statusText);
+        
+        // Intentar obtener el cuerpo de la respuesta como texto primero para depuración
+        const responseText = await response.text();
+        console.log('Respuesta completa del servidor:', responseText);
+        
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (parseError) {
+            console.error('Error al analizar la respuesta JSON:', parseError);
+            throw new Error(`Respuesta del servidor no válida: ${responseText.substring(0, 200)}...`);
         }
         
-        const data = await response.json();
+        if (!response.ok) {
+            console.error('Error en la respuesta:', data);
+            throw new Error(data.message || `Error HTTP: ${response.status} - ${response.statusText}`);
+        }
+        
+        console.log('Datos recibidos:', data);
         
         if (data.success) {
             if (data.data && data.data.length > 0) {
+                console.log(`Se encontraron ${data.data.length} resultados`);
                 displaySearchResults(data.data);
             } else {
+                console.log('No se encontraron resultados');
                 searchResults.innerHTML = `
                     <div class="alert alert-info">
                         No se encontraron resultados para "${searchTerm}"
@@ -2804,13 +2833,30 @@ async function searchPolicia(searchTerm) {
                 `;
             }
         } else {
-            throw new Error(data.message || 'Error en la respuesta del servidor');
+            console.error('Error en la respuesta del servidor:', data);
+            let errorMessage = data.message || 'Error desconocido en la respuesta del servidor';
+            if (data.error) errorMessage += ` (${data.error})`;
+            if (data.detail) errorMessage += ` - ${data.detail}`;
+            throw new Error(errorMessage);
         }
     } catch (error) {
         console.error('Error al buscar oficiales:', error);
+        let errorMessage = error.message || 'Error desconocido';
+        
+        // Mensajes más amigables para errores comunes
+        if (error.message.includes('Failed to fetch')) {
+            errorMessage = 'No se pudo conectar al servidor. Verifica tu conexión a internet.';
+        } else if (error.message.includes('500')) {
+            errorMessage = 'Error interno del servidor. Por favor, inténtalo de nuevo más tarde.';
+        } else if (error.message.includes('404')) {
+            errorMessage = 'El recurso solicitado no existe. Por favor, verifica la URL.';
+        }
+        
         searchResults.innerHTML = `
             <div class="alert alert-danger">
-                Error al buscar oficiales: ${error.message}
+                <h5>Error al buscar oficiales</h5>
+                <p>${errorMessage}</p>
+                <p class="small text-muted mt-2">Si el problema persiste, contacta al administrador.</p>
             </div>
         `;
     }
